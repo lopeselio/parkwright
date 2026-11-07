@@ -20,6 +20,8 @@ export class Tools {
   private hover: [number, number] | null = null;
   private ghostOk = mat('#7ccf7a', { transparent: true, opacity: 0.55 });
   private ghostBad = mat('#e85d5d', { transparent: true, opacity: 0.55 });
+  /** One shared unit box, scaled per preview — previews run on every mouse move, so nothing is allocated per frame. */
+  private static unit = new THREE.BoxGeometry(1, 1, 1);
   onSelect: (rideId: number) => void = () => {};
   onChange: () => void = () => {};
   /** Echo the equivalent terminal command, so players learn `pw`. */
@@ -138,7 +140,8 @@ export class Tools {
     if (!at) return;
     const t = this.tool;
     const box = (x: number, y: number, w: number, h: number, ok: boolean, ht = 0.12) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, ht, h - 0.06), ok ? this.ghostOk : this.ghostBad);
+      const m = new THREE.Mesh(Tools.unit, ok ? this.ghostOk : this.ghostBad);
+      m.scale.set(w - 0.06, ht, h - 0.06);
       m.position.set(x + w / 2, ht / 2 + 0.02, y + h / 2);
       g.add(m);
     };

@@ -10,6 +10,12 @@ export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0
 const SHIRTS = ['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '#f08fc0', '#ffffff', '#3d5a80', '#ee964b'];
 const SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 const MAX_PEOPLE = 4000;
+const MAX_STAFF = 200;
+
+/** Free the GPU buffers of a model we're throwing away (materials are shared and cached). */
+function disposeTree(o: THREE.Object3D) {
+  o.traverse((x) => { const m = x as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); });
+}
 
 interface RideView { ride: Ride; group: THREE.Group; animate: Animator; key: string }
 
@@ -86,7 +92,7 @@ export class World {
 
     this.bodies = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.07, 0.16, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
     this.heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 6, 5), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
-    this.staffMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.08, 0.18, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.6, flatShading: true }), 200);
+    this.staffMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.08, 0.18, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.6, flatShading: true }), MAX_STAFF);
     for (const m of [this.bodies, this.heads, this.staffMesh]) { m.castShadow = true; m.count = 0; m.frustumCulled = false; this.scene.add(m); }
     for (let i = 0; i < MAX_PEOPLE; i++) {
       this.bodies.setColorAt(i, new THREE.Color(SHIRTS[i % SHIRTS.length]));
@@ -202,10 +208,10 @@ export class World {
     const seen = new Set<number>();
     for (const r of st.rides) {
       seen.add(r.id);
-      const key = `${r.x},${r.y},${r.rot},${r.track?.length ?? 0}`;
+      const key = `${r.type},${r.x},${r.y},${r.rot},${r.track?.length ?? 0}`;
       const have = this.rides.get(r.id);
       if (have && have.key === key) { have.ride = r; continue; }
-      if (have) this.scene.remove(have.group);
+      if (have) { this.scene.remove(have.group); disposeTree(have.group); }
       const t = this.c.rideTypes[r.type];
       const { group, animate } = buildModel(t.model, t.color, r.w, r.h);
       const root = new THREE.Group();
@@ -229,11 +235,12 @@ export class World {
       loadModel(t.model).then((glb) => {
         if (!glb || this.rides.get(r.id) !== view) return;
         holder.remove(group);
+        disposeTree(group);
         holder.add(glb);
         view.animate = (tt, run) => glb.userData.animate?.(tt, run);
       });
     }
-    for (const [id, v] of this.rides) if (!seen.has(id)) { this.scene.remove(v.group); this.rides.delete(id); }
+    for (const [id, v] of this.rides) if (!seen.has(id)) { this.scene.remove(v.group); disposeTree(v.group); this.rides.delete(id); }
   }
 
   private syncScenery(st: ParkState) {
@@ -241,7 +248,7 @@ export class World {
     for (let k = 0; k < st.scenery.length; k++) if (st.scenery[k]) key += k + ':' + st.scenery[k] + ',';
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
-    for (const [k, o] of this.scenery) if (st.scenery[k] !== o.userData.id) { this.scene.remove(o); this.scenery.delete(k); }
+    for (const [k, o] of this.scenery) if (st.scenery[k] !== o.userData.id) { this.scene.remove(o); disposeTree(o); this.scenery.delete(k); }
     for (let k = 0; k < st.scenery.length; k++) {
       const id = st.scenery[k];
       if (!id || this.scenery.has(k)) continue;
@@ -254,11 +261,15 @@ export class World {
     }
   }
 
+  private tmp = { m: new THREE.Matrix4(), h: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(1, 1, 1), p: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color() };
+  private chains = new Map<number, [number, number][]>();
+  private chainsVersion = -1;
+
   private syncPeople(st: ParkState, alpha: number) {
-    const m = new THREE.Matrix4(), h = new THREE.Matrix4();
-    const q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+    const { m, h, q, sc, p, up } = this.tmp;
     let n = 0;
-    const queueSlots = new Map<number, [number, number][]>();
+    if (this.chainsVersion !== st.mapVersion) { this.chains.clear(); this.chainsVersion = st.mapVersion; }
+    const queueSlots = this.chains;
     const queuePos = new Map<number, [number, number, number]>();
     for (const r of st.rides) {
       if (!r.queue.length) continue;
@@ -281,9 +292,11 @@ export class World {
         p.set(v.tx + (v.nx - v.tx) * f + 0.5 + ox, 0, v.ty + (v.ny - v.ty) * f + 0.5 + oz);
       }
       const bob = v.mode === 'queuing' ? 0 : Math.abs(Math.sin((v.p + v.id) * 0.4)) * 0.03;
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), [Math.PI, -Math.PI / 2, 0, Math.PI / 2][v.dir]);
-      m.compose(p.clone().setY(0.17 + bob), q, sc);
-      h.compose(p.clone().setY(0.36 + bob), q, sc);
+      q.setFromAxisAngle(up, [Math.PI, -Math.PI / 2, 0, Math.PI / 2][v.dir]);
+      p.y = 0.17 + bob;
+      m.compose(p, q, sc);
+      p.y = 0.36 + bob;
+      h.compose(p, q, sc);
       this.bodies.setMatrixAt(n, m);
       this.heads.setMatrixAt(n, h);
       n++;
@@ -293,11 +306,12 @@ export class World {
     const roleColor = { handyman: '#2f7d4f', mechanic: '#d06a1f', guard: '#2b3f7a', entertainer: '#e04fa0' } as const;
     let ns = 0;
     for (const s of st.staff) {
+      if (ns >= MAX_STAFF) break;
       const f = Math.min(1, s.p / SUB);
       p.set(s.tx + (s.nx - s.tx) * f + 0.5, 0.2, s.ty + (s.ny - s.ty) * f + 0.5);
       m.compose(p, q.identity(), sc);
       this.staffMesh.setMatrixAt(ns, m);
-      this.staffMesh.setColorAt(ns, new THREE.Color(roleColor[s.role]));
+      this.staffMesh.setColorAt(ns, this.tmp.c.set(roleColor[s.role]));
       ns++;
     }
     this.staffMesh.count = ns;
@@ -331,7 +345,8 @@ export class World {
     for (const v of this.rides.values()) {
       const running = v.ride.status === 'open' && (v.ride.cycle > 0 || this.c.rideTypes[v.ride.type].kind !== 'flat');
       v.animate(time, running);
-      v.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && v.ride.status === 'broken') o.rotation.z = Math.sin(time * 20) * 0.01; });
+      // A broken ride shudders.
+      v.group.rotation.z = v.ride.status === 'broken' ? Math.sin(time * 20) * 0.01 : 0;
     }
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
