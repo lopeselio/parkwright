@@ -1,0 +1,344 @@
+import * as THREE from 'three';
+import { SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
+import type { Content } from '@parkwright/content';
+import { buildModel, buildScenery, mat, type Animator } from './models.ts';
+import { loadModel } from './assets.ts';
+
+/** Tile (x,y) centre in world space. 1 tile = 1 unit. */
+export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0, y + 0.5);
+
+const SHIRTS = ['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '#f08fc0', '#ffffff', '#3d5a80', '#ee964b'];
+const SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
+const MAX_PEOPLE = 4000;
+
+interface RideView { ride: Ride; group: THREE.Group; animate: Animator; key: string }
+
+export class World {
+  readonly scene = new THREE.Scene();
+  readonly camera: THREE.OrthographicCamera;
+  readonly renderer: THREE.WebGLRenderer;
+  readonly ground: THREE.Mesh;
+  private pathMesh: THREE.InstancedMesh;
+  private queueMesh: THREE.InstancedMesh;
+  private binMesh: THREE.InstancedMesh;
+  private litterMesh: THREE.InstancedMesh;
+  private bodies: THREE.InstancedMesh;
+  private heads: THREE.InstancedMesh;
+  private staffMesh: THREE.InstancedMesh;
+  private rides = new Map<number, RideView>();
+  private scenery = new Map<number, THREE.Object3D>();
+  private gate: THREE.Group;
+  private mapVersion = -1;
+  private sceneryKey = '';
+  readonly ghost = new THREE.Group();
+  /** Camera orbit state. */
+  target = new THREE.Vector3();
+  yaw = Math.PI / 4;
+  zoom = 14;
+  private yawTo = Math.PI / 4;
+
+  constructor(canvas: HTMLCanvasElement, private s: () => ParkState, private c: Content) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.scene.background = new THREE.Color('#bfe3f0');
+    this.scene.fog = new THREE.Fog('#bfe3f0', 60, 140);
+    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+
+    const hemi = new THREE.HemisphereLight('#fff6e0', '#6a8a5a', 1.1);
+    const sun = new THREE.DirectionalLight('#fff1d6', 2.2);
+    sun.position.set(-30, 50, -20);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    const sc = sun.shadow.camera;
+    sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.far = 200;
+    sun.shadow.bias = -0.0005;
+    this.scene.add(hemi, sun, sun.target);
+    this.sun = sun;
+
+    const st = s();
+    const g = new THREE.PlaneGeometry(st.w, st.h, st.w, st.h);
+    g.rotateX(-Math.PI / 2);
+    this.ground = new THREE.Mesh(g, this.grassMaterial(st.w, st.h));
+    this.ground.position.set(st.w / 2, 0, st.h / 2);
+    this.ground.receiveShadow = true;
+    this.scene.add(this.ground);
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.4, 1.2, st.h + 0.4), mat('#7a5a3a'));
+    skirt.position.set(st.w / 2, -0.61, st.h / 2);
+    this.scene.add(skirt);
+    const outside = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), mat('#9cc98a'));
+    outside.position.set(st.w / 2, -1.2, st.h / 2);
+    this.scene.add(outside);
+
+    const tileGeo = new THREE.BoxGeometry(1, 0.06, 1);
+    const n = st.w * st.h;
+    this.pathMesh = new THREE.InstancedMesh(tileGeo, mat('#d8c9a8'), n);
+    this.queueMesh = new THREE.InstancedMesh(tileGeo, mat('#9fb6cf'), n);
+    for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; this.scene.add(m); }
+    this.binMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.08, 0.07, 0.22, 8), mat('#3e6e4a'), n);
+    this.binMesh.castShadow = true;
+    this.binMesh.count = 0;
+    this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
+    this.litterMesh.count = 0;
+    this.scene.add(this.binMesh, this.litterMesh);
+
+    this.bodies = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.07, 0.16, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
+    this.heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 6, 5), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
+    this.staffMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.08, 0.18, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.6, flatShading: true }), 200);
+    for (const m of [this.bodies, this.heads, this.staffMesh]) { m.castShadow = true; m.count = 0; m.frustumCulled = false; this.scene.add(m); }
+    for (let i = 0; i < MAX_PEOPLE; i++) {
+      this.bodies.setColorAt(i, new THREE.Color(SHIRTS[i % SHIRTS.length]));
+      this.heads.setColorAt(i, new THREE.Color(SKIN[(i * 7) % SKIN.length]));
+    }
+
+    this.gate = this.buildGate();
+    this.scene.add(this.gate);
+    this.scene.add(this.ghost);
+    this.target.copy(tileCenter(st.gate[0], st.gate[1] - 10));
+    this.resize();
+    addEventListener('resize', () => this.resize());
+  }
+
+  private sun: THREE.DirectionalLight;
+
+  private grassMaterial(w: number, h: number) {
+    const cv = document.createElement('canvas');
+    cv.width = w * 8; cv.height = h * 8;
+    const ctx = cv.getContext('2d')!;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = ((x * 73856093) ^ (y * 19349663)) & 7;
+      ctx.fillStyle = (x + y) % 2 ? `hsl(100 38% ${52 + v * 0.6}%)` : `hsl(98 40% ${50 + v * 0.6}%)`;
+      ctx.fillRect(x * 8, y * 8, 8, 8);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = THREE.NearestFilter;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
+  }
+
+  private buildGate() {
+    const st = this.s();
+    const g = new THREE.Group();
+    const p = tileCenter(st.gate[0], st.gate[1]);
+    for (const sx of [-0.55, 0.55]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.4, 0.18), mat('#c0533a'));
+      post.position.set(sx, 0.7, 0);
+      post.castShadow = true;
+      g.add(post);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.28, 0.24), mat('#f2b84b'));
+    beam.position.y = 1.45;
+    beam.castShadow = true;
+    g.add(beam);
+    g.position.copy(p);
+    return g;
+  }
+
+  resize() {
+    const w = innerWidth, h = innerHeight;
+    this.renderer.setSize(w, h, false);
+    const a = w / h;
+    this.camera.left = -this.zoom * a; this.camera.right = this.zoom * a;
+    this.camera.top = this.zoom; this.camera.bottom = -this.zoom;
+    this.camera.updateProjectionMatrix();
+  }
+
+  rotate(step: number) { this.yawTo += step * (Math.PI / 2); }
+  setZoom(z: number) { this.zoom = Math.max(4, Math.min(40, z)); this.resize(); }
+  focus(x: number, y: number) { this.focusTo = tileCenter(x, y); }
+  private focusTo: THREE.Vector3 | null = null;
+
+  pan(dx: number, dz: number) {
+    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    this.target.x += dx * c - dz * s;
+    this.target.z += dx * s + dz * c;
+    const st = this.s();
+    this.target.x = Math.max(0, Math.min(st.w, this.target.x));
+    this.target.z = Math.max(0, Math.min(st.h, this.target.z));
+    this.focusTo = null;
+  }
+
+  private placeCamera() {
+    this.yaw += (this.yawTo - this.yaw) * 0.18;
+    if (this.focusTo) {
+      this.target.lerp(this.focusTo, 0.12);
+      if (this.target.distanceTo(this.focusTo) < 0.05) this.focusTo = null;
+    }
+    const d = 60;
+    this.camera.position.set(this.target.x - Math.sin(this.yaw) * d * 0.7, d * 0.72, this.target.z + Math.cos(this.yaw) * d * 0.7);
+    this.camera.lookAt(this.target);
+    this.sun.position.set(this.target.x - 30, 50, this.target.z - 20);
+    this.sun.target.position.copy(this.target);
+  }
+
+  /** Pick the ground tile under a screen point. */
+  pickTile(ndc: THREE.Vector2): [number, number] | null {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const hit = ray.intersectObject(this.ground)[0];
+    if (!hit) return null;
+    const st = this.s();
+    const x = Math.floor(hit.point.x), y = Math.floor(hit.point.z);
+    return x >= 0 && y >= 0 && x < st.w && y < st.h ? [x, y] : null;
+  }
+
+  private syncTiles(st: ParkState) {
+    const m = new THREE.Matrix4();
+    let np = 0, nq = 0, nb = 0;
+    for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+      const k = y * st.w + x;
+      const t = st.tiles[k];
+      if (t === Tile.Path) { m.makeTranslation(x + 0.5, 0.03, y + 0.5); this.pathMesh.setMatrixAt(np++, m); }
+      else if (t === Tile.Queue) { m.makeTranslation(x + 0.5, 0.035, y + 0.5); this.queueMesh.setMatrixAt(nq++, m); }
+      if (st.bins[k]) { m.makeTranslation(x + 0.82, 0.14, y + 0.82); this.binMesh.setMatrixAt(nb++, m); }
+    }
+    this.pathMesh.count = np; this.queueMesh.count = nq; this.binMesh.count = nb;
+    for (const im of [this.pathMesh, this.queueMesh, this.binMesh]) im.instanceMatrix.needsUpdate = true;
+  }
+
+  private syncRides(st: ParkState) {
+    const seen = new Set<number>();
+    for (const r of st.rides) {
+      seen.add(r.id);
+      const key = `${r.x},${r.y},${r.rot},${r.track?.length ?? 0}`;
+      const have = this.rides.get(r.id);
+      if (have && have.key === key) { have.ride = r; continue; }
+      if (have) this.scene.remove(have.group);
+      const t = this.c.rideTypes[r.type];
+      const { group, animate } = buildModel(t.model, t.color, r.w, r.h);
+      const root = new THREE.Group();
+      const holder = new THREE.Group();
+      holder.add(group);
+      holder.position.set(r.x + r.w / 2, 0, r.y + r.h / 2);
+      // Stalls and buildings face their entrance; round rides look the same from every side.
+      if (t.kind !== 'flat' || t.model === 'spookwalk') holder.rotation.y = [Math.PI, Math.PI / 2, 0, -Math.PI / 2][r.rot];
+      root.userData.rideId = r.id;
+      root.add(holder);
+      if (t.kind === 'flat') {
+        const entr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), mat('#c76a4a'));
+        entr.position.set(r.ex + 0.5, 0.03, r.ey + 0.5);
+        entr.receiveShadow = true;
+        root.add(entr);
+      }
+      this.scene.add(root);
+      const view: RideView = { ride: r, group: root, animate, key };
+      this.rides.set(r.id, view);
+      // Swap in a Blender-built model when one exists.
+      loadModel(t.model).then((glb) => {
+        if (!glb || this.rides.get(r.id) !== view) return;
+        holder.remove(group);
+        holder.add(glb);
+        view.animate = (tt, run) => glb.userData.animate?.(tt, run);
+      });
+    }
+    for (const [id, v] of this.rides) if (!seen.has(id)) { this.scene.remove(v.group); this.rides.delete(id); }
+  }
+
+  private syncScenery(st: ParkState) {
+    let key = '';
+    for (let k = 0; k < st.scenery.length; k++) if (st.scenery[k]) key += k + ':' + st.scenery[k] + ',';
+    if (key === this.sceneryKey) return;
+    this.sceneryKey = key;
+    for (const [k, o] of this.scenery) if (st.scenery[k] !== o.userData.id) { this.scene.remove(o); this.scenery.delete(k); }
+    for (let k = 0; k < st.scenery.length; k++) {
+      const id = st.scenery[k];
+      if (!id || this.scenery.has(k)) continue;
+      const o = buildScenery(id);
+      o.userData.id = id;
+      o.position.set((k % st.w) + 0.5, 0, Math.floor(k / st.w) + 0.5);
+      o.rotation.y = (k * 1.7) % (Math.PI * 2);
+      this.scene.add(o);
+      this.scenery.set(k, o);
+    }
+  }
+
+  private syncPeople(st: ParkState, alpha: number) {
+    const m = new THREE.Matrix4(), h = new THREE.Matrix4();
+    const q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
+    let n = 0;
+    const queueSlots = new Map<number, [number, number][]>();
+    const queuePos = new Map<number, [number, number, number]>();
+    for (const r of st.rides) {
+      if (!r.queue.length) continue;
+      let chain = queueSlots.get(r.id);
+      if (!chain) { chain = queueChain(st, r); queueSlots.set(r.id, chain); }
+      r.queue.forEach((vid, i) => {
+        const tile = chain![Math.floor(i / 8)] ?? [r.ex, r.ey];
+        const slot = i % 8;
+        queuePos.set(vid, [tile[0] + 0.2 + (slot % 4) * 0.2, tile[1] + 0.3 + Math.floor(slot / 4) * 0.4, 0]);
+      });
+    }
+    for (const v of st.visitors) {
+      if (v.mode === 'riding' || v.mode === 'gone' || n >= MAX_PEOPLE) continue;
+      const qp = queuePos.get(v.id);
+      if (v.mode === 'queuing' && qp) p.set(qp[0], 0, qp[1]);
+      else {
+        const f = Math.min(1, (v.p + alpha * 2) / SUB);
+        const lane = ((v.id * 37) % 7) / 7 - 0.43;
+        const ox = v.ny !== v.ty ? lane * 0.5 : 0, oz = v.nx !== v.tx ? lane * 0.5 : 0;
+        p.set(v.tx + (v.nx - v.tx) * f + 0.5 + ox, 0, v.ty + (v.ny - v.ty) * f + 0.5 + oz);
+      }
+      const bob = v.mode === 'queuing' ? 0 : Math.abs(Math.sin((v.p + v.id) * 0.4)) * 0.03;
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), [Math.PI, -Math.PI / 2, 0, Math.PI / 2][v.dir]);
+      m.compose(p.clone().setY(0.17 + bob), q, sc);
+      h.compose(p.clone().setY(0.36 + bob), q, sc);
+      this.bodies.setMatrixAt(n, m);
+      this.heads.setMatrixAt(n, h);
+      n++;
+    }
+    this.bodies.count = n; this.heads.count = n;
+    this.bodies.instanceMatrix.needsUpdate = true; this.heads.instanceMatrix.needsUpdate = true;
+    const roleColor = { handyman: '#2f7d4f', mechanic: '#d06a1f', guard: '#2b3f7a', entertainer: '#e04fa0' } as const;
+    let ns = 0;
+    for (const s of st.staff) {
+      const f = Math.min(1, s.p / SUB);
+      p.set(s.tx + (s.nx - s.tx) * f + 0.5, 0.2, s.ty + (s.ny - s.ty) * f + 0.5);
+      m.compose(p, q.identity(), sc);
+      this.staffMesh.setMatrixAt(ns, m);
+      this.staffMesh.setColorAt(ns, new THREE.Color(roleColor[s.role]));
+      ns++;
+    }
+    this.staffMesh.count = ns;
+    this.staffMesh.instanceMatrix.needsUpdate = true;
+    if (this.staffMesh.instanceColor) this.staffMesh.instanceColor.needsUpdate = true;
+  }
+
+  private syncLitter(st: ParkState) {
+    const m = new THREE.Matrix4();
+    let n = 0;
+    for (let k = 0; k < st.litter.length; k++) {
+      const c = Math.min(3, st.litter[k]);
+      for (let i = 0; i < c; i++) {
+        const x = (k % st.w) + 0.2 + ((k * 13 + i * 31) % 60) / 100, y = Math.floor(k / st.w) + 0.2 + ((k * 7 + i * 17) % 60) / 100;
+        m.makeRotationY(k + i).setPosition(x, 0.07, y);
+        this.litterMesh.setMatrixAt(n++, m);
+      }
+    }
+    this.litterMesh.count = n;
+    this.litterMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /** alpha: fraction of the way to the next sim tick, for smooth walking. */
+  render(time: number, alpha: number) {
+    const st = this.s();
+    if (st.mapVersion !== this.mapVersion || (st.tick & 15) === 0) { this.syncTiles(st); this.mapVersion = st.mapVersion; }
+    this.syncRides(st);
+    this.syncScenery(st);
+    this.syncPeople(st, alpha);
+    if ((st.tick & 31) === 0) this.syncLitter(st);
+    for (const v of this.rides.values()) {
+      const running = v.ride.status === 'open' && (v.ride.cycle > 0 || this.c.rideTypes[v.ride.type].kind !== 'flat');
+      v.animate(time, running);
+      v.group.traverse((o) => { if ((o as THREE.Mesh).isMesh && v.ride.status === 'broken') o.rotation.z = Math.sin(time * 20) * 0.01; });
+    }
+    this.placeCamera();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  rideAt(x: number, y: number): number {
+    const st = this.s();
+    return st.occ[y * st.w + x] ?? 0;
+  }
+}
