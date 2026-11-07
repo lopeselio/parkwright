@@ -25,7 +25,7 @@ It is not a port or remake of any existing game: no names, art, code or levels f
 ## 3. Time and units
 
 - The simulation runs at 20 ticks per second at 1× speed (speeds 0, 1×, 2×, 4×).
-- A day is 600 ticks (30 s at 1×). A week is 7 days and a season is 4 weeks (28 days). There are no years, only seasons 1, 2, 3, and so on.
+- A day is 1800 ticks (90 s at 1×). A week is 7 days and a season is 4 weeks (28 days). There are no years, only seasons 1, 2, 3, and so on.
 - Money is integer **cents** of park credits ("cr"). Ratings are integers ×100 (6.50 → 650). Visitor stats are 0–255.
 - RNG: a single seeded xoshiro128** per park, held in sim state. Nothing in the simulation calls `Math.random`.
 
