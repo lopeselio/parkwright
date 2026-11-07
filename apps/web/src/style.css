@@ -110,3 +110,4 @@ kbd { background: #2e2b36; padding: 0 6px; border-radius: 4px; }
   #drawer, #side { left: 8px; right: 8px; width: auto; top: auto; bottom: 86px; max-height: 50vh; }
   #keys { display: none; }
 }
+.save-err { color: var(--bad); font-size: 12px; }
