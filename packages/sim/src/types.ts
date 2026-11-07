@@ -51,6 +51,8 @@ export interface Ride {
   /** Reliability ×100 (10000 = 100 %). */
   reliability: number;
   builtDay: number;
+  /** What the park actually paid to build it (after mod hooks); refunds are based on this. */
+  paid?: number;
   /** Visitor ids, front first. */
   queue: number[];
   riders: number[];
@@ -151,6 +153,8 @@ export interface DayStats {
   arrivals: number;
   rating: number;
   income: number;
+  /** Ride ticket income only (for the rideIncome objective). */
+  rideIncome: number;
   costs: number;
   /** cents spent per patron group per venue — the onchain settlement source. */
   spend: Record<string, Record<string, number>>;
