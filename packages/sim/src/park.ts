@@ -1,5 +1,5 @@
 import type { Content } from '@parkwright/content';
-import { ACTIONS, type ActionResult, type Hook } from './actions.ts';
+import { ACTIONS, checkParams, type ActionResult, type Hook } from './actions.ts';
 import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues } from './economy.ts';
 import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
@@ -9,7 +9,7 @@ import { DAYS_PER_SEASON, DAYS_PER_WEEK, TICKS_PER_DAY, Tile, type ActionRecord,
 import { spawnVisitor, updateVisitor } from './visitors.ts';
 
 const beauty = (id: number) => SCENERY[id]?.beauty ?? 0;
-const freshDay = (day: number): DayStats => ({ day, visitors: 0, arrivals: 0, rating: 0, income: 0, costs: 0, spend: {} });
+const freshDay = (day: number): DayStats => ({ day, visitors: 0, arrivals: 0, rating: 0, income: 0, rideIncome: 0, costs: 0, spend: {} });
 
 export function newState(c: Content, scenarioId: string, seed: number, name = 'My Park'): ParkState {
   const sc = c.scenarios[scenarioId];
@@ -57,8 +57,9 @@ export class Park {
   }
 
   /** Rebuild from scratch by replaying an action log. */
-  static replay(c: Content, scenario: string, seed: number, log: ActionRecord[], untilTick: number, name?: string) {
+  static replay(c: Content, scenario: string, seed: number, log: ActionRecord[], untilTick: number, name?: string, hooks: Hook[] = []) {
     const p = Park.create(c, scenario, seed, name);
+    p.hooks = hooks;
     const sorted = [...log].sort((a, b) => a.tick - b.tick);
     for (const rec of sorted) {
       if (rec.tick > untilTick) break;
@@ -82,6 +83,8 @@ export class Park {
   query(type: string, params: Record<string, unknown>): ActionResult {
     const a = ACTIONS[type];
     if (!a) return { ok: false, error: `unknown action "${type}"`, hint: `actions: ${Object.keys(ACTIONS).join(', ')}` };
+    const bad = checkParams(this.s, params);
+    if (bad) return bad;
     const ctx = { s: this.s, c: this.c };
     let res = a.query(ctx, params);
     if (!res.ok) return res;
@@ -108,6 +111,10 @@ export class Park {
       const cost = q.cost; // hooks may have adjusted it in query
       if (cost > 0) book(this.s, a.category ?? 'construction', -cost);
       res.cost = cost;
+      if (type === 'ride.build' && res.data) {
+        const built = this.s.rides.find((r) => r.id === (res.data as { id: number }).id);
+        if (built) built.paid = cost;
+      }
       this.log.push(record);
       if (type.startsWith('ride.') || type.startsWith('scenery.')) refreshRideValues(this.s, this.c, beauty);
       for (const h of this.hooks) h.execute?.({ s: this.s, c: this.c }, type, params, res);
@@ -136,6 +143,10 @@ export class Park {
   private endDay() {
     const s = this.s, c = this.c;
     for (const r of s.rides) wearRide(s, c, r);
+    // Running costs are charged daily (a seventh of the weekly rate) into today's stats,
+    // so hiring and firing around payday can't dodge them.
+    payUpkeep(s, c);
+    for (const st of s.staff) book(s, 'wages', -Math.round(c.staff[st.role].wage / 7));
     refreshRideValues(s, c, beauty);
     s.rating = computeRating(s, c);
     s.visitors = s.visitors.filter((v) => v.mode !== 'gone');
@@ -146,21 +157,20 @@ export class Park {
     s.history.push(done);
     if (s.history.length > DAYS_PER_SEASON * 2) s.history.shift();
     s.day++;
-    if (s.day % DAYS_PER_WEEK === 0) this.endWeek();
     s.today = freshDay(s.day);
+    if (s.day % DAYS_PER_WEEK === 0) this.startWeek();
     this.checkObjective();
     this.emit({ kind: 'day', stats: done });
   }
 
-  private endWeek() {
-    const s = this.s, c = this.c;
-    payUpkeep(s, c);
-    for (const st of s.staff) book(s, 'wages', -c.staff[st.role].wage);
+  /** New week: fresh weekly ledger, then this week's interest and campaign countdown. */
+  private startWeek() {
+    const s = this.s;
+    s.ledgerWeek = emptyLedger();
+    for (const r of s.rides) r.incomeWeek = 0;
     if (s.loan > 0) book(s, 'interest', -Math.floor((s.loan * s.interestBp) / 10000 / 4));
     for (const m of s.campaigns) m.weeksLeft--;
     s.campaigns = s.campaigns.filter((m) => m.weeksLeft > 0);
-    for (const r of s.rides) r.incomeWeek = 0;
-    s.ledgerWeek = emptyLedger();
   }
 
   private checkObjective() {
@@ -171,7 +181,7 @@ export class Park {
     switch (o.kind) {
       case 'visitors': won = s.visitors.length >= o.count && s.rating >= o.minRating; deadline = o.byDay; break;
       case 'parkValue': won = parkValue(s, c) >= o.value; deadline = o.byDay; break;
-      case 'rideIncome': won = s.history.slice(-7).reduce((a, d) => a + d.income, 0) >= o.perWeek; break;
+      case 'rideIncome': won = s.history.slice(-7).reduce((a, d) => a + d.rideIncome, 0) >= o.perWeek; break;
       case 'coasters': won = s.rides.filter((r) => r.track && (r.ratings?.e ?? 0) >= o.minExcitement).length >= o.count; deadline = o.byDay; break;
       case 'sandbox': return;
     }
