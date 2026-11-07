@@ -1,5 +1,6 @@
 packages:
   - apps/*
   - packages/*
+# Vite 8 bundles with Rolldown; esbuild's install script is not needed.
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: false
