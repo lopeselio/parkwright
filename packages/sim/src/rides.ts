@@ -2,8 +2,8 @@ import type { Content } from '@parkwright/content';
 import { book } from './economy.ts';
 import { ejectQueue } from './actions.ts';
 import { chance, randInt } from './rng.ts';
-import { finishRide, pay, think } from './visitors.ts';
-import type { ParkState, Ride } from './types.ts';
+import { finishRide, leaveRide, pay, think } from './visitors.ts';
+import type { ParkState, Ride, Visitor } from './types.ts';
 
 /** How long a partial load waits for more riders before it runs anyway. */
 const LOAD_PATIENCE = 120;
@@ -51,16 +51,28 @@ function trackCycle(r: Ride): number {
 export function wearRide(s: ParkState, c: Content, r: Ride) {
   const t = c.rideTypes[r.type];
   const ageSeasons = Math.floor((s.day - r.builtDay) / 28);
-  r.reliability = Math.max(0, r.reliability - t.wear * (1 + ageSeasons * 0.25));
+  r.reliability = Math.max(0, r.reliability - Math.round(t.wear * (1 + ageSeasons * 0.25)));
   if (r.status !== 'open' || t.kind === 'stall') return;
   const risk = 10000 - r.reliability; // 0..10000
-  if (chance(s.rng, risk, 40000)) breakDown(s, r);
+  if (chance(s.rng, risk, 40000)) breakDown(s, c, r);
 }
 
-export function breakDown(s: ParkState, r: Ride) {
+export function breakDown(s: ParkState, c: Content, r: Ride, byId?: Map<number, Visitor>) {
   r.status = 'broken';
   r.brokenSince = s.tick;
   ejectQueue(s, r);
+  // Riders are let off (and refunded) rather than left stuck until a mechanic comes.
+  for (const id of r.riders) {
+    const v = byId?.get(id) ?? s.visitors.find((x) => x.id === id);
+    if (!v) continue;
+    if (r.price > 0) { v.cash += r.price; v.spent -= r.price; book(s, 'refunds', -r.price); }
+    leaveRide(s, r, v);
+    v.happy = Math.max(0, v.happy - 25);
+    think(s, v, `${r.name} broke down`, r.id);
+  }
+  r.riders = [];
+  r.cycle = 0;
+  s.incidents += 20;
 }
 
 /** Mechanics: send the nearest idle one to broken rides, and inspect old ones. */
@@ -76,6 +88,7 @@ export function inspectRide(s: ParkState, r: Ride) {
   r.lastInspected = s.day;
 }
 
+/** Upkeep is charged daily (1/7 of the weekly figure), so a ride built and removed inside a week still pays. */
 export function payUpkeep(s: ParkState, c: Content) {
-  for (const r of s.rides) book(s, 'upkeep', -c.rideTypes[r.type].upkeep);
+  for (const r of s.rides) book(s, 'upkeep', -Math.round(c.rideTypes[r.type].upkeep / 7));
 }

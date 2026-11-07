@@ -68,6 +68,7 @@ export function pay(s: ParkState, v: Visitor, amount: number, cat: 'gate' | 'rid
   v.cash -= amount;
   v.spent += amount;
   book(s, cat, amount);
+  if (cat === 'rides') s.today.rideIncome += amount;
   const g = (s.today.spend[String(v.group)] ??= {});
   g[venue] = (g[venue] ?? 0) + amount;
 }
@@ -79,7 +80,8 @@ function attraction(c: Content, r: Ride) {
 
 /** Value a visitor perceives; halved when they paid to get in. */
 function perceived(s: ParkState, r: Ride) {
-  return s.fee > 0 ? r.value >> 1 : r.value;
+  const paidEntry = s.fee > 0 && !s.campaigns.some((m) => m.kind === 'freeEntry');
+  return paidEntry ? r.value >> 1 : r.value;
 }
 
 /** Why a visitor won't ride, or null if they will. */
@@ -214,9 +216,18 @@ function chooseStep(s: ParkState, c: Content, routes: Routes, v: Visitor) {
     const r = s.rides.find((x) => x.id === (v.goal as { ride: number }).ride)!;
     field = routes.toRide(r);
   } else if (v.goal?.kind === 'exit') field = routes.toExit();
+  if (!isPath(s, v.tx, v.ty)) {
+    // The path was removed under them: walk them back to the gate.
+    v.tx = v.nx = s.gate[0];
+    v.ty = v.ny = s.gate[1];
+    return;
+  }
   const opts: Dir[] = [];
   for (let d = 0 as Dir; d < 4; d = (d + 1) as Dir) if (isPath(s, v.tx + DX[d], v.ty + DY[d])) opts.push(d);
-  if (!opts.length) { v.lostTicks += 32; return; }
+  if (!opts.length) { v.lostTicks += 32; }
+  // Someone trying to leave who can't reach the gate gives up and is shown out.
+  if (v.mode === 'leaving' && v.lostTicks > 2400) { v.mode = 'gone'; return; }
+  if (!opts.length) return;
   let pick: Dir | null = null;
   if (field) {
     const here = Routes.dist(s, field, v.tx, v.ty);
@@ -304,13 +315,17 @@ export function finishRide(s: ParkState, c: Content, v: Visitor, r: Ride) {
     if (v.queasy > 200) { think(s, v, 'feeling sick'); }
   }
   v.happy = clamp(v.happy + sat);
-  // Back onto the path next to the entrance.
-  const out = accessTiles(s, r)[0];
-  const [x, y] = out ?? s.gate;
+  leaveRide(s, r, v);
+}
+
+/** Put a visitor back on the path next to the ride's entrance (or at the gate if it has no path). */
+export function leaveRide(s: ParkState, r: Ride, v: Visitor) {
+  const [x, y] = accessTiles(s, r)[0] ?? s.gate;
   v.tx = v.nx = x;
   v.ty = v.ny = y;
   v.p = 0;
   v.mode = 'walking';
+  v.goal = null;
 }
 
 export function updateVisitor(s: ParkState, c: Content, routes: Routes, v: Visitor) {
