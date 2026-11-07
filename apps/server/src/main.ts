@@ -11,12 +11,13 @@ const statics = serveStatic(WEB_DIST);
 const server = createServer(async (req, res) => {
   try {
     const url = req.url ?? '/';
-    if (url === '/api/health') {
+    const path = url.split('?')[0];
+    if (path === '/api/health') {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ ok: true, version: VERSION }));
       return;
     }
-    if (url.startsWith('/api/')) {
+    if (path.startsWith('/api/')) {
       res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'not found' }));
       return;
     }
