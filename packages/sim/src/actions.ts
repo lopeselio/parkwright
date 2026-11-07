@@ -49,7 +49,12 @@ export function findRide(s: ParkState, ref: unknown): Ride | undefined {
     const n = ref.trim().toLowerCase();
     if (!n) return undefined;
     if (/^\d+$/.test(n)) return s.rides.find((r) => r.id === Number(n));
-    return s.rides.find((r) => r.name.toLowerCase() === n) ?? s.rides.find((r) => r.name.toLowerCase().startsWith(n));
+    const name = (r: Ride) => r.name.toLowerCase();
+    return s.rides.find((r) => name(r) === n)
+      ?? s.rides.find((r) => name(r).startsWith(n))
+      ?? s.rides.find((r) => r.type === n)
+      ?? s.rides.find((r) => name(r).split(/\s+/).some((w) => w.startsWith(n)))
+      ?? s.rides.find((r) => name(r).includes(n));
   }
   return undefined;
 }
