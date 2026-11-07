@@ -47,6 +47,7 @@ export function findRide(s: ParkState, ref: unknown): Ride | undefined {
   if (typeof ref === 'number') return s.rides.find((r) => r.id === ref);
   if (typeof ref === 'string') {
     const n = ref.trim().toLowerCase();
+    if (!n) return undefined;
     if (/^\d+$/.test(n)) return s.rides.find((r) => r.id === Number(n));
     return s.rides.find((r) => r.name.toLowerCase() === n) ?? s.rides.find((r) => r.name.toLowerCase().startsWith(n));
   }
@@ -66,6 +67,26 @@ function lineTiles(x: number, y: number, x2?: number, y2?: number): [number, num
 }
 
 const int = (v: unknown) => (typeof v === 'number' ? v : Number(v));
+
+/** Integer-valued params, by name. Anything else here would make replay diverge (NaN → null in JSON). */
+const INT_PARAMS = ['x', 'y', 'x2', 'y2', 'rot', 'weeks'] as const;
+const COORDS = new Set(['x', 'y', 'x2', 'y2']);
+
+/** Reject non-integer or off-map coordinates before any action runs. */
+export function checkParams(s: ParkState, p: Record<string, unknown>): ActionResult | null {
+  for (const k of INT_PARAMS) {
+    if (p[k] === undefined || p[k] === null) continue;
+    const v = typeof p[k] === 'number' ? (p[k] as number) : Number(p[k]);
+    if (!Number.isInteger(v)) return fail(`${k} must be a whole number, got "${p[k]}"`);
+    if (COORDS.has(k)) {
+      const max = (k.startsWith('x') ? s.w : s.h) - 1;
+      if (v < 0 || v > max) return fail(`${k}=${v} is off the map`, `the map is ${s.w}×${s.h} (0–${s.w - 1}, 0–${s.h - 1})`);
+    }
+  }
+  if (p.rot !== undefined && p.rot !== null && (Number(p.rot) < 0 || Number(p.rot) > 3)) return fail('rot must be 0–3 (entrance side: 0 N, 1 E, 2 S, 3 W)');
+  if (p.weeks !== undefined && p.weeks !== null && (Number(p.weeks) < 1 || Number(p.weeks) > 8)) return fail('weeks must be 1–8');
+  return null;
+}
 
 function freeCell(s: ParkState, x: number, y: number) {
   const k = idx(s, x, y);
@@ -130,6 +151,8 @@ def({
   query({ s }, p) {
     const tiles = lineTiles(int(p.x), int(p.y), p.x2 === undefined ? undefined : int(p.x2), p.y2 === undefined ? undefined : int(p.y2));
     if (tiles.some(([x, y]) => x === s.gate[0] && y === s.gate[1])) return fail('the gate tile must stay a path');
+    const entrance = s.rides.find((r) => tiles.some(([x, y]) => x === r.ex && y === r.ey) && isPath(s, r.ex, r.ey));
+    if (entrance) return fail(`${entrance.ex},${entrance.ey} is the entrance of ${entrance.name}`, 'demolish the ride first, or leave that tile');
     if (!tiles.some(([x, y]) => inBounds(s, x, y) && tileAt(s, x, y) !== Tile.Grass)) return fail('no path there');
     return { ok: true, cost: 0 };
   },
@@ -219,7 +242,8 @@ def({
     for (let k = 0; k < s.occ.length; k++) if (s.occ[k] === r.id) s.occ[k] = 0;
     s.rides = s.rides.filter((x) => x.id !== r.id);
     s.mapVersion++;
-    const refund = Math.floor(c.rideTypes[r.type].cost * DEMOLISH_REFUND) + (r.track ? r.track.length * 1500 : 0);
+    // Refund half of what was actually paid (a mod may have changed the price), never the list price.
+    const refund = Math.floor((r.paid ?? c.rideTypes[r.type].cost) * DEMOLISH_REFUND);
     book(s, 'refunds', refund);
     return { ok: true, cost: 0, focus: { x: r.x, y: r.y }, message: `demolished ${r.name}, refunded ${(refund / 100).toFixed(2)} cr` };
   },

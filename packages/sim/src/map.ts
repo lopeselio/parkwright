@@ -88,15 +88,18 @@ export function accessTiles(s: ParkState, r: Ride): [number, number][] {
  */
 export class Routes {
   private version = -1;
+  private state: ParkState | null = null;
   private fields = new Map<string, Int32Array>();
 
   constructor(private s: () => ParkState) {}
 
   private ensure() {
     const s = this.s();
-    if (s.mapVersion !== this.version) {
+    // A loaded save can share a mapVersion with the old one, so also key on the state object.
+    if (s.mapVersion !== this.version || s !== this.state) {
       this.fields.clear();
       this.version = s.mapVersion;
+      this.state = s;
     }
   }
 
