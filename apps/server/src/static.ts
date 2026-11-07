@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
+import { pipeline } from 'node:stream';
 import { createGzip } from 'node:zlib';
 
 const TYPES: Record<string, string> = {
@@ -64,8 +65,13 @@ export function serveStatic(root: string) {
     else headers['content-length'] = String(st.size);
     res.writeHead(200, headers);
     if (req.method === 'HEAD') { res.end(); return true; }
-    const stream = createReadStream(file);
-    (gzip ? stream.pipe(createGzip()) : stream).pipe(res);
+    // pipeline() forwards errors and tears everything down if the client goes away or a read fails mid-response.
+    const done = (err: NodeJS.ErrnoException | null) => {
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.error('[static]', file, err.message);
+      if (err) res.destroy();
+    };
+    if (gzip) pipeline(createReadStream(file), createGzip(), res, done);
+    else pipeline(createReadStream(file), res, done);
     return true;
   };
 }
