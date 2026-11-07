@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parkwright</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="view" tabindex="0"></canvas>
+    <header id="top"></header>
+    <nav id="tools"></nav>
+    <aside id="drawer"></aside>
+    <aside id="side"></aside>
+    <section id="terminal"><div class="term-head"><span>park terminal</span><kbd>`</kbd></div><div id="term-body"></div></section>
+    <div id="toast" class="toast"></div>
+    <footer id="keys">drag paths · R rotate · Q/E turn · WASD pan · wheel zoom · space pause · ` terminal</footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
