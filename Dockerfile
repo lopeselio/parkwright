@@ -1,5 +1,5 @@
 # Build the web client, then run the Node server (which serves it) on Node 24 with native TS type stripping.
-FROM node:24-alpine AS build
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -12,7 +12,7 @@ COPY packages packages
 COPY apps apps
 RUN pnpm --filter @parkwright/web build
 
-FROM node:24-alpine
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 WEB_DIST=/app/web
 COPY --from=build /app/apps/web/dist /app/web
