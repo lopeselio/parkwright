@@ -152,6 +152,26 @@ Errors are guided: a refusal says what would be valid ("no path at 12,8; nearest
 - **AI manager:** a NEAR AI Cloud model in a TEE (attested), driven by a tool loop whose only tool is `pw`. It has a budget per day, set by the player. Every prompt and reply is signed, and you can check its proof bundle with `pnpm verify:manager`.
 - **Claude Code over MCP:** `packages/mcp` exposes `pw` as an MCP tool against a running server, so `claude mcp add parkwright …` can play your park.
 
+### 8.1 The modding terminal
+
+The terminal can also make mods. You describe what you want, an AI writes the mod pack, and the game checks it before anything loads.
+
+- **Commands:**
+  - `pw mod list | show <id> | validate <id> | enable <id> | disable <id> | export <id>`
+  - `pw mod ai "<request>"`, e.g. `pw mod ai "a spooky drop tower that sells hot cocoa at night"`. The assistant returns a draft pack and a diff.
+  - `pw mod apply` loads the draft; `pw mod discard` drops it.
+- **AI backends:**
+  - **NEAR AI** (default, and the only one hosted): a TEE-attested model on NEAR AI Cloud. The request and your park's data stay private, and each reply is signed (see the AI manager above).
+  - **Claude terminal** (local only): `pnpm dev` with `PW_CLAUDE_TERMINAL=1` lets the server spawn the real `claude` CLI in a PTY, streamed to the in-game xterm panel over a WebSocket.
+    - It runs in `mods/workspace/`, with the parkwright MCP server attached and `--allowedTools` limited to `mcp__parkwright__*` plus Read/Write/Edit inside that folder.
+    - No `--dangerously-skip-permissions`, and no shell.
+    - It is never enabled on the hosted server.
+- **What AI mods may contain:** data only, meaning ride types, items, scenery and scenarios, all checked against the content schema with sane bounds. Ratings, costs and capacities are clamped.
+  - Behaviour changes use **declarative rules**, not code. For example, `{ "on": "ride.build", "when": { "type": "teacups" }, "cost": "×0.5" }` or `{ "on": "ride.build", "when": { "kind": "stall" }, "veto": "stalls are banned in this scenario" }`. The sim turns these into query hooks.
+  - Hand-written local mods may also ship `hooks.js`, which runs in a Worker sandbox. AI output is never run as code.
+- **Assets:** a mod can name a model id. If no `.glb` exists, the client uses the procedural mesh tinted with the mod's colour. On a local install, the Claude terminal can also write a Blender script into `assets/blender/mods/` for `pnpm assets` to build.
+- **Persistence:** mods are stored by content hash (Cosmos DB hosted, `mods/` locally). Saves list the hashes they need, and a save won't load with a different version of a mod.
+
 ## 9. NEAR (testnet)
 
 Contract `parkwright.testnet` (Rust, near-sdk 5.x):
