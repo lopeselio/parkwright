@@ -32,13 +32,18 @@ export class Tools {
     let panning: { x: number; y: number } | null = null;
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
+      // Capture so a release outside the canvas (over the HUD or outside the window) still ends the drag here.
+      canvas.setPointerCapture(e.pointerId);
       if (e.button === 2 || e.button === 1) { panning = { x: e.clientX, y: e.clientY }; return; }
       const t = world.pickTile(ndc(e));
       if (!t) return;
       if (this.tool.kind === 'path' || this.tool.kind === 'scenery' || this.tool.kind === 'bulldoze') this.dragFrom = t;
       else this.click(t);
     });
-    addEventListener('pointerup', (e) => {
+    const cancel = () => { panning = null; this.dragFrom = null; this.preview(); };
+    canvas.addEventListener('pointercancel', cancel);
+    canvas.addEventListener('lostpointercapture', () => { panning = null; });
+    canvas.addEventListener('pointerup', (e) => {
       if (panning) { panning = null; return; }
       if (!this.dragFrom) return;
       const t = world.pickTile(ndc(e)) ?? this.hover ?? this.dragFrom;
@@ -47,6 +52,7 @@ export class Tools {
       this.preview();
     });
     canvas.addEventListener('pointermove', (e) => {
+      if (e.buttons === 0 && (panning || this.dragFrom)) { cancel(); return; }
       if (panning) {
         const k = (world.zoom * 2) / innerHeight;
         world.pan(-(e.clientX - panning.x) * k, -(e.clientY - panning.y) * k * 1.4);
