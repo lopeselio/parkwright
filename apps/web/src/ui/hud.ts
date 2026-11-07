@@ -14,32 +14,52 @@ export class Hud {
   constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void) {
     tools.onSelect = (id) => { this.selected = id; this.panel = null; this.renderSide(); };
     tools.onChange = () => this.renderTools();
+    // Never rebuild the side panel between mousedown and mouseup, or the click is lost.
+    $('#side').addEventListener('pointerdown', () => { this.pressing = true; });
+    addEventListener('pointerup', () => { setTimeout(() => { this.pressing = false; }, 0); });
     this.renderTools();
     this.renderTop();
     setInterval(() => { this.renderTop(); this.renderSide(false); }, 250);
   }
 
+  /** Live value nodes in the top bar; patched in place so buttons are never rebuilt under the cursor. */
+  private topRefs: { date: HTMLElement; cash: HTMLElement; bar: HTMLElement; rating: HTMLElement; visitors: HTMLElement; save: HTMLElement } | null = null;
+
   private renderTop() {
     const s = this.game.s;
+    // Rebuild the bar only when its structure changes (speed, open panel, goal state); otherwise patch numbers.
+    const key = [s.name, this.game.speed, this.panel, s.objective.status].join('|');
+    if (key !== this.last || !this.topRefs) {
+      this.last = key;
+      const speeds = [0, 1, 2, 4].map((n) => h('button', { class: `speed ${this.game.speed === n ? 'on' : ''}`, title: n ? `${n}× speed` : 'pause', onclick: () => { this.game.speed = n; this.renderTop(); } }, n ? `${n}×` : '❚❚'));
+      const refs = { date: h('span', { class: 'date' }), cash: h('b'), bar: h('i'), rating: h('b'), visitors: h('b'), save: h('div', { class: 'save-err' }) };
+      this.topRefs = refs;
+      $('#top').replaceChildren(
+        h('div', { class: 'brand' }, h('b', {}, s.name), refs.date),
+        h('div', { class: 'stat' }, h('label', {}, 'Cash'), refs.cash),
+        h('div', { class: 'stat' }, h('label', {}, 'Rating'), h('div', { class: 'bar' }, refs.bar), refs.rating),
+        h('div', { class: 'stat' }, h('label', {}, 'Visitors'), refs.visitors),
+        refs.save,
+        h('div', { class: 'speeds' }, ...speeds),
+        h('div', { class: 'menu' },
+          ...(['finance', 'visitors', 'staff'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => { this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop(); } }, p[0].toUpperCase() + p.slice(1))),
+          h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
+        ),
+        s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
+      );
+    }
+    const r = this.topRefs!;
     const season = Math.floor(s.day / DAYS_PER_SEASON) + 1;
     const week = (Math.floor(s.day / DAYS_PER_WEEK) % 4) + 1;
-    const key = [s.cash, s.rating, s.visitors.length, s.day, this.game.speed, s.objective.status].join('|');
-    if (key === this.last) return;
-    this.last = key;
-    const speeds = [0, 1, 2, 4].map((n) => h('button', { class: `speed ${this.game.speed === n ? 'on' : ''}`, title: n ? `${n}× speed` : 'pause', onclick: () => { this.game.speed = n; this.last = ''; this.renderTop(); } }, n ? `${n}×` : '❚❚'));
+    r.date.textContent = `Season ${season} · Week ${week} · Day ${s.day + 1}`;
+    r.cash.textContent = cr(s.cash);
+    r.cash.className = s.cash < 0 ? 'neg' : '';
     const pct = s.rating / 10;
-    $('#top').replaceChildren(
-      h('div', { class: 'brand' }, h('b', {}, s.name), h('span', { class: 'date' }, `Season ${season} · Week ${week} · Day ${s.day + 1}`)),
-      h('div', { class: 'stat' }, h('label', {}, 'Cash'), h('b', { class: s.cash < 0 ? 'neg' : '' }, cr(s.cash))),
-      h('div', { class: 'stat' }, h('label', {}, 'Rating'), h('div', { class: 'bar' }, h('i', { style: `width:${pct}%;background:${pct > 60 ? '#7ccf7a' : pct > 40 ? '#f2b84b' : '#e85d5d'}` })), h('b', {}, String(s.rating))),
-      h('div', { class: 'stat' }, h('label', {}, 'Visitors'), h('b', {}, String(s.visitors.length))),
-      h('div', { class: 'speeds' }, ...speeds),
-      h('div', { class: 'menu' },
-        ...(['finance', 'visitors', 'staff'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => { this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.last = ''; this.renderTop(); } }, p[0].toUpperCase() + p.slice(1))),
-        h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
-      ),
-      s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
-    );
+    r.bar.style.width = `${pct}%`;
+    r.bar.style.background = pct > 60 ? '#7ccf7a' : pct > 40 ? '#f2b84b' : '#e85d5d';
+    r.rating.textContent = String(s.rating);
+    r.visitors.textContent = String(s.visitors.length);
+    r.save.textContent = this.game.saveError ?? '';
   }
 
   renderTools() {
@@ -80,6 +100,7 @@ export class Hud {
   }
 
   private sideKey = '';
+  private pressing = false;
 
   /** Re-render the side panel; on the timer only when what it shows has changed (so clicks aren't lost). */
   private renderSide(force = true) {
@@ -87,7 +108,7 @@ export class Hud {
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
     const key = `${this.selected}|${this.panel}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
-    if (!force && key === this.sideKey) return;
+    if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
       const r = s.rides.find((x) => x.id === this.selected);
