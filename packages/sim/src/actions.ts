@@ -446,6 +446,7 @@ def({
   },
   execute({ s }, p) {
     s.bins[idx(s, int(p.x), int(p.y))] = 1;
+    s.mapVersion++; // renderers redraw path furniture on map changes
     return { ok: true, cost: BIN_COST, focus: { x: int(p.x), y: int(p.y) } };
   },
 });
