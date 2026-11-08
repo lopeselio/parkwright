@@ -258,6 +258,8 @@ export class World {
         if (!glb || this.rides.get(r.id) !== view) return;
         holder.remove(group);
         disposeTree(group);
+        // Models are authored wide along x; a ride rotated to a tall footprint turns its model to match.
+        if (t.model === 'wheel' && r.w < r.h) glb.rotation.y = Math.PI / 2;
         holder.add(glb);
         view.animate = (tt, run) => glb.userData.animate?.(tt, run);
       });
