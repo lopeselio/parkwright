@@ -32,7 +32,10 @@ async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: stri
   const admin = chain.adminClient(local ? {} : { privateKey: process.env.PARK_ADMIN_KEY });
   const patrons = chain.PATRONS.map((a) => chain.patronClient(a, local ? {} : { privateKey: patronKeys[a] }));
   const api: ChainApi = {
+    admin: chain.ADMIN,
     registerPark: (id, name) => admin.registerPark(id, name),
+    parkOwner: async (id) => (await chain.getPark(id))?.owner ?? null,
+    lastSettledDay: (g, id) => chain.lastSettledDay(chain.PATRONS[g], id),
     settleDay: (g, id, day, lines, hash) => patrons[g].settleDay(id, day, lines, hash),
     patronBalance: async (g) => BigInt((await chain.getPatron(chain.PATRONS[g]))?.balance ?? '0'),
     topUp: (gs) => admin.fundPatrons(gs.map((g) => chain.PATRONS[g]), chain.TOP_UP),
@@ -45,6 +48,8 @@ const { settler, chainPark } = await makeSettler();
 if (settler) {
   const every = Number(process.env.SETTLE_MS ?? 20_000);
   setInterval(() => { settler.tick().catch((e) => console.error('[settle]', e)); }, every).unref();
+  // Budgets are topped up on their own schedule (not only after a pass that settled something).
+  setInterval(() => { settler.refill().catch((e) => console.error('[settle]', e)); }, Number(process.env.REFILL_MS ?? 300_000)).unref();
 }
 const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark }, { webDist: WEB_DIST, version: VERSION });
 // Don't let slow clients hold connections open (defaults are 300 s / 60 s).
