@@ -18,6 +18,7 @@
     "@azure/identity": "4.14.1",
     "@parkwright/content": "workspace:*",
     "@parkwright/sim": "workspace:*",
-    "redis": "6.3.1"
+    "redis": "6.3.1",
+    "@parkwright/chain": "workspace:*"
   }
 }

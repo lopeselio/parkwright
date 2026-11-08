@@ -9,7 +9,7 @@ export function createApp(deps: Deps, opts: { webDist: string; version: string }
       const path = (req.url ?? '/').split('?')[0];
       if (path === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind }));
+        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler }));
         return;
       }
       if (path.startsWith('/api/')) {
