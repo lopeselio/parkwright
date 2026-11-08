@@ -1,5 +1,6 @@
 import type { Content } from '@parkwright/content';
 import { ACTIONS, checkParams, type ActionResult, type Hook } from './actions.ts';
+import './coaster.ts'; // registers coaster.* actions
 import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues } from './economy.ts';
 import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
@@ -111,9 +112,10 @@ export class Park {
       const cost = q.cost; // hooks may have adjusted it in query
       if (cost > 0) book(this.s, a.category ?? 'construction', -cost);
       res.cost = cost;
-      if (type === 'ride.build' && res.data) {
+      // Record what was actually paid (after hooks), so refunds can never exceed it.
+      if ((type === 'ride.build' || type === 'coaster.start' || type === 'coaster.add') && res.data) {
         const built = this.s.rides.find((r) => r.id === (res.data as { id: number }).id);
-        if (built) built.paid = cost;
+        if (built) built.paid = (type === 'coaster.add' ? built.paid ?? 0 : 0) + cost;
       }
       this.log.push(record);
       if (type.startsWith('ride.') || type.startsWith('scenery.')) refreshRideValues(this.s, this.c, beauty);

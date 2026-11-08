@@ -74,7 +74,7 @@ function lineTiles(x: number, y: number, x2?: number, y2?: number): [number, num
 const int = (v: unknown) => (typeof v === 'number' ? v : Number(v));
 
 /** Integer-valued params, by name. Anything else here would make replay diverge (NaN → null in JSON). */
-const INT_PARAMS = ['x', 'y', 'x2', 'y2', 'rot', 'weeks'] as const;
+const INT_PARAMS = ['x', 'y', 'x2', 'y2', 'rot', 'weeks', 'dir', 'count'] as const;
 const COORDS = new Set(['x', 'y', 'x2', 'y2']);
 
 /** Reject non-integer or off-map coordinates before any action runs. */
@@ -90,6 +90,7 @@ export function checkParams(s: ParkState, p: Record<string, unknown>): ActionRes
   }
   if (p.rot !== undefined && p.rot !== null && (Number(p.rot) < 0 || Number(p.rot) > 3)) return fail('rot must be 0–3 (entrance side: 0 N, 1 E, 2 S, 3 W)');
   if (p.weeks !== undefined && p.weeks !== null && (Number(p.weeks) < 1 || Number(p.weeks) > 8)) return fail('weeks must be 1–8');
+  if (p.dir !== undefined && p.dir !== null && (Number(p.dir) < 0 || Number(p.dir) > 3)) return fail('dir must be 0–3 (0 N, 1 E, 2 S, 3 W)');
   return null;
 }
 
