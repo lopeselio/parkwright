@@ -16,8 +16,12 @@ function fakeChain() {
   const settled = new Set<string>();
   const calls: string[] = [];
   const balances = new Array(8).fill(1_000_000n);
+  const owners = new Map<string, string>();
   const api: ChainApi = {
-    registerPark: async (id) => { calls.push(`register ${id}`); return 'tx-r'; },
+    admin: 'admin.testnet',
+    registerPark: async (id) => { owners.set(id, 'admin.testnet'); calls.push(`register ${id}`); return 'tx-r'; },
+    parkOwner: async (id) => owners.get(id) ?? null,
+    lastSettledDay: async (g, id) => { const ds = [...settled].filter((k) => k.startsWith(`${g}|${id}|`)).map((k) => Number(k.split('|')[2])); return ds.length ? Math.max(...ds) : null; },
     settleDay: async (g, id, day, lines) => {
       const k = `${g}|${id}|${day}`;
       if (settled.has(k)) throw new Error('Smart contract panicked: that day is already settled');
@@ -31,10 +35,10 @@ function fakeChain() {
     lines: (spend) => settlementLines(spend),
     lowWater: 500_000n,
   };
-  return { api, settled, calls, balances };
+  return { api, settled, calls, balances, owners };
 }
 
-async function parkWithDays(days: number) {
+async function parkWithDays(days: number, createdAt = 0) {
   const p = Park.create(baseContent, 'meadow', 3, 'Chain Park');
   p.run('path.place', { x: 24, y: 30, x2: 24, y2: 40 });
   p.run('ride.build', { type: 'carousel', x: 20, y: 30, rot: 2 });
@@ -44,7 +48,7 @@ async function parkWithDays(days: number) {
   const dir = await mkdtemp(join(tmpdir(), 'pw-settle-'));
   dirs.push(dir);
   const store = new FileStore(dir);
-  const doc: ParkDoc = { id: 'chainpark1', name: 'Chain Park', ownerHash: 'x', rating: 0, value: 0, visitors: 0, day: p.s.day, scenario: 'meadow', save: { v: 1, snapshot: p.snapshot(), log: [] }, createdAt: 0, updatedAt: 0, version: 1 };
+  const doc: ParkDoc = { id: 'chainpark1', name: 'Chain Park', ownerHash: 'x', rating: 0, value: 0, visitors: 0, day: p.s.day, scenario: 'meadow', save: { v: 1, snapshot: p.snapshot(), log: [] }, createdAt, updatedAt: 0, version: 1 };
   await store.create(doc);
   return { store, park: p };
 }
@@ -85,22 +89,59 @@ describe('settlement worker', () => {
     expect(s2.log.some((l) => l.includes('failed'))).toBe(false);
   });
 
-  it('only one replica settles at a time', async () => {
+  it('only one replica settles at a time, and a lock is only released by its holder', async () => {
     const { store } = await parkWithDays(1);
     const cache = new MemoryCache();
     const s = new Settler(fakeChain().api, store, cache);
-    expect(await cache.lock('lock:settle', 60)).toBe(true);
+    expect(await cache.lock('lock:settle', 60, 'other')).toBe(true);
     await s.markDirty('chainpark1');
     expect(await s.tick()).toBe(0);
+    await cache.unlock('lock:settle', 'not-mine');
+    expect(await cache.lock('lock:settle', 60, 'x')).toBe(false);
   });
 
-  it('tops up patrons that run low', async () => {
-    const { store } = await parkWithDays(2);
+  it('tops up patrons that run low, on its own schedule', async () => {
+    const { store } = await parkWithDays(1);
     const chain = fakeChain();
     chain.balances[0] = 1000n;
+    await new Settler(chain.api, store, new MemoryCache()).refill();
+    expect(chain.calls.some((c) => c.startsWith('topup') && c.includes('0'))).toBe(true);
+  });
+
+  it('review: registers a missing park before settling, and checks the chain to skip settled days', async () => {
+    const { store } = await parkWithDays(2);
+    const chain = fakeChain();
     const s = new Settler(chain.api, store, new MemoryCache());
     await s.markDirty('chainpark1');
     await s.tick();
-    expect(chain.calls.some((c) => c.startsWith('topup') && c.includes('0'))).toBe(true);
+    expect(chain.calls[0]).toBe('register chainpark1');
+    // A worker that lost its cache asks the chain first, so it sends nothing at all.
+    const before = chain.calls.length;
+    const s2 = new Settler(chain.api, store, new MemoryCache());
+    await s2.markDirty('chainpark1');
+    await s2.tick();
+    expect(chain.calls.length).toBe(before);
+  });
+
+  it('review: never settles into a park someone else owns', async () => {
+    const { store } = await parkWithDays(2);
+    const chain = fakeChain();
+    chain.owners.set('chainpark1', 'mallory.testnet');
+    const s = new Settler(chain.api, store, new MemoryCache());
+    await s.markDirty('chainpark1');
+    expect(await s.tick()).toBe(0);
+    expect(chain.settled.size).toBe(0);
+  });
+
+  it('review: days that claim to be ahead of real time are not sent', async () => {
+    const now = 1_800_000_000_000;
+    const { store } = await parkWithDays(3, now - 30_000);
+    const chain = fakeChain();
+    // The worker's clock reads 10 s after the park was created: floor(10 / 20) + 2 slack = day 2 at most.
+    const s = new Settler(chain.api, store, new MemoryCache(), () => now - 20_000);
+    await s.markDirty('chainpark1');
+    await s.tick();
+    const days = [...chain.settled].map((k) => Number(k.split('|')[2]));
+    expect(Math.max(...days)).toBeLessThanOrEqual(2);
   });
 });
