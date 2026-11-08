@@ -116,6 +116,12 @@ export class Park {
       if ((type === 'ride.build' || type === 'coaster.start' || type === 'coaster.add') && res.data) {
         const built = this.s.rides.find((r) => r.id === (res.data as { id: number }).id);
         if (built) built.paid = (type === 'coaster.add' ? built.paid ?? 0 : 0) + cost;
+        // Spread what was paid over the pieces just placed, so undo refunds exactly that.
+        if (built?.track && type !== 'ride.build') {
+          const n = type === 'coaster.start' ? built.track.length : Number(params.count ?? 1);
+          const fresh = built.track.slice(-n);
+          fresh.forEach((tp, i) => { tp.paid = Math.floor(cost / n) + (i === n - 1 ? cost % n : 0); });
+        }
       }
       this.log.push(record);
       if (type.startsWith('ride.') || type.startsWith('scenery.')) refreshRideValues(this.s, this.c, beauty);

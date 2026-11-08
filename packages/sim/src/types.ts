@@ -73,6 +73,8 @@ export interface Ride {
   stats?: import('./coaster.ts').CoasterStats;
   /** Ticks per ride cycle for coasters (from the test run). */
   cycleTicks?: number;
+  /** Bumped on every track change or test, so renderers know to rebuild. */
+  trackRev?: number;
 }
 
 export interface TrackPiece {
@@ -81,6 +83,8 @@ export interface TrackPiece {
   y: number;
   z: number;
   dir: Dir;
+  /** What this piece actually cost (after mod hooks); undo refunds are based on it. */
+  paid?: number;
 }
 
 export type VisitorMode = 'walking' | 'queuing' | 'riding' | 'leaving' | 'gone';

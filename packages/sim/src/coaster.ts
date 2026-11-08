@@ -140,10 +140,10 @@ export function trackPath(track: TrackPiece[]): PathPoint[] {
       }
       out[i] = sum / (2 * SMOOTH_R + 1);
     }
+    // No pinning: the station's far end eases into the lift instead of stepping (pins create kinks).
     h = out;
   }
-  // Stations stay exactly level so trains stop where riders board.
-  for (let i = 0; i < m; i++) pts[i].y = PIECES[track[pts[i].piece].piece].station ? track[pts[i].piece].z * LEVEL_M : h[i];
+  for (let i = 0; i < m; i++) pts[i].y = h[i];
   return pts;
 }
 
@@ -279,10 +279,19 @@ export function rateCoaster(st: CoasterStats): Ratings {
 
 const fail = (error: string, hint?: string): ActionResult => ({ ok: false, error, hint });
 
+/** The coaster named, or by default the most recent one still being built (not yet rated). */
 function buildingCoaster(s: ParkState, ref: unknown): Ride | undefined {
   if (ref !== undefined && ref !== null && ref !== '') return findRide(s, ref);
-  // Default: the most recent coaster that isn't finished.
-  return [...s.rides].reverse().find((r) => r.track && !isClosed(r.track)) ?? [...s.rides].reverse().find((r) => r.track);
+  return [...s.rides].reverse().find((r) => r.track && !r.ratings) ?? [...s.rides].reverse().find((r) => r.track && !isClosed(r.track));
+}
+
+/** Track changed: ratings, stats and cycle are no longer valid. */
+function trackChanged(r: Ride) {
+  r.ratings = null;
+  r.stats = undefined;
+  r.cycleTicks = undefined;
+  r.status = 'testing';
+  r.trackRev = (r.trackRev ?? 0) + 1;
 }
 
 function tileFree(s: ParkState, x: number, y: number) {
@@ -306,7 +315,7 @@ const startDef: ActionDef = {
       if (!tileFree(s, tx, ty)) return fail(`station tile ${tx},${ty} is not clear grass`, 'pick an open area at least 3 tiles long');
     }
     const [ex, ey] = stationEntrance(x, y, dir);
-    if (!inBounds(s, ex, ey) || s.occ[idx(s, ex, ey)] || s.scenery[idx(s, ex, ey)] || tileAt(s, ex, ey) === Tile.Queue) return fail(`the entrance tile ${ex},${ey} is blocked`, 'the entrance goes on the left of the middle station tile');
+    if (!inBounds(s, ex, ey) || s.occ[idx(s, ex, ey)] || s.scenery[idx(s, ex, ey)] || (tileAt(s, ex, ey) !== Tile.Grass && tileAt(s, ex, ey) !== Tile.Path)) return fail(`the entrance tile ${ex},${ey} is blocked`, 'the entrance goes on the left of the middle station tile');
     return { ok: true, cost: PIECES.station.cost * STATION_LEN, focus: { x, y } };
   },
   execute({ s }, p) {
@@ -397,8 +406,7 @@ const addDef: ActionDef = {
       r.track!.push({ piece: piece.id, x: pose.x, y: pose.y, z: pose.z, dir: pose.dir });
       for (const [tx, ty] of pieceTiles(pose, piece)) s.occ[idx(s, tx, ty)] = r.id;
     }
-    r.ratings = null;
-    r.status = 'testing';
+    trackChanged(r);
     s.mapVersion++;
     const end = endPose(r.track!)!;
     const msg = isClosed(r.track!) ? `${r.name}: circuit closed! Run coaster.test` : `added ${count} ${piece.name.toLowerCase()}${count > 1 ? 's' : ''}; next piece goes at ${end.x},${end.y} height ${end.z * LEVEL_M} m heading ${['N', 'E', 'S', 'W'][end.dir]}`;
@@ -414,6 +422,7 @@ const undoDef: ActionDef = {
     const r = buildingCoaster(s, p.ride);
     if (!r?.track) return fail('no coaster is being built');
     if (r.track.length <= STATION_LEN) return fail('only the station is left', 'demolish the ride to remove it');
+    if (r.status === 'open' || r.status === 'broken') return fail(`${r.name} is running`, 'close it first (ride.close)');
     if (r.queue.length || r.riders.length) return fail(`${r.name} has visitors on it`, 'close it and wait for the train to empty');
     return { ok: true, cost: 0 };
   },
@@ -421,12 +430,12 @@ const undoDef: ActionDef = {
     const r = buildingCoaster(s, p.ride)!;
     const last = r.track!.pop()!;
     for (const [tx, ty] of pieceTiles(last, PIECES[last.piece])) s.occ[idx(s, tx, ty)] = 0;
-    // Refund the piece, but never more than was actually paid for the track (mods can make pieces cheaper).
-    const refund = Math.min(PIECES[last.piece].cost, r.paid ?? 0);
-    r.paid = (r.paid ?? 0) - refund;
+    // Full refund while the ride has never carried anyone; half (like demolish) once it has.
+    const piecePaid = Math.min(last.paid ?? PIECES[last.piece].cost, r.paid ?? 0);
+    const refund = r.customers > 0 ? Math.floor(piecePaid / 2) : piecePaid;
+    r.paid = (r.paid ?? 0) - piecePaid;
     book(s, 'refunds', refund);
-    r.ratings = null;
-    r.status = 'testing';
+    trackChanged(r);
     s.mapVersion++;
     return { ok: true, cost: 0, focus: { x: last.x, y: last.y, label: r.name }, message: `removed a ${PIECES[last.piece].name.toLowerCase()}` };
   },
@@ -454,6 +463,7 @@ const testDef: ActionDef = {
     r.ratings = rateCoaster(st);
     r.stats = st;
     r.cycleTicks = Math.round(st.duration * 20) + 80;
+    r.trackRev = (r.trackRev ?? 0) + 1;
     if (r.status === 'testing') r.status = 'closed';
     const f = (x: number) => (x / 100).toFixed(2);
     return {
