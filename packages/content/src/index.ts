@@ -27,3 +27,4 @@ export function buildContent(packs: ModPack[]): Content {
 }
 
 export const baseContent: Content = buildContent([basePack]);
+export * from './mods.ts';
