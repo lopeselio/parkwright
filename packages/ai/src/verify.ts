@@ -1,5 +1,8 @@
-// Check a NEAR AI Cloud reply signature in the browser (or Node): no trust in our server needed.
+// Check a NEAR AI Cloud reply signature in the browser (or Node).
 // provider_tee signs `${model}:${sha256(request)}:${sha256(response)}` with EIP-191 ECDSA (secp256k1).
+// What this proves on its own: the exact request/response bytes were signed by that key. Which keys belong
+// to an attested TEE comes from the model's attestation report — fetched via our server; verifying the
+// TDX/GPU quote itself (with a client nonce) is not done in the browser yet.
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2';
 import { keccak_256 } from '@noble/hashes/sha3';
@@ -51,10 +54,17 @@ export function verifyProof(p: ProofBundle, trustedSigners: string[] = []): Chec
   try { recovered = recoverAddress(sig.text, sig.signature).toLowerCase(); } catch { /* fails below */ }
   const expected = `${p.model}:${sha256Hex(p.requestBody)}:${sha256Hex(p.responseBody)}`;
   const checks: Check[] = [
-    { id: 'sig.kind', label: 'Signed inside the model TEE (provider_tee)', ok: (sig.signature_kind ?? 'provider_tee') === 'provider_tee' },
+    { id: 'sig.kind', label: 'Signed inside the model TEE (provider_tee)', ok: sig.signature_kind === 'provider_tee' },
     { id: 'sig.payload', label: 'Signature covers this exact request and reply', ok: sig.text === expected },
     { id: 'sig.valid', label: 'Signature is valid for the claimed TEE key', ok: recovered !== '' && recovered === sig.signing_address.toLowerCase() },
   ];
-  if (trustedSigners.length) checks.push({ id: 'sig.attested', label: 'Signing key is in the model’s attestation report', ok: trustedSigners.map((s) => s.toLowerCase()).includes(recovered) });
+  // No attestation list means we can't tie the key to a TEE: that's a failed check, not a skipped one.
+  checks.push({ id: 'sig.attested', label: 'Signing key is in the model’s attestation report', ok: trustedSigners.length > 0 && trustedSigners.map((s) => s.toLowerCase()).includes(recovered) });
   return checks;
+}
+
+/** The model's reply text, taken from the signed response bytes (not from anything the server re-sent). */
+export function contentFromProof(p: ProofBundle): string {
+  const j = JSON.parse(p.responseBody);
+  return String(j?.choices?.[0]?.message?.content ?? '');
 }
