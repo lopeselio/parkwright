@@ -18,24 +18,26 @@ const relay = new LocalRelay();
 beforeAll(async () => {
   const cache = new MemoryCache();
   server = createApp({ store: new FileStore('/tmp/pw-bridge-unused'), cache, docs: new Layered(cache), relay }, { webDist: '/tmp', version: 't' });
-  attachBridge(server, relay);
+  attachBridge(server, relay, cache);
   await new Promise<void>((r) => server.listen(0, r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterAll(() => server.close());
 
 /** A stand-in for the browser tab: holds a park and answers commands like the real client. */
-async function fakeTab() {
+async function fakeTab(resume?: { code: string; secret: string }) {
   const park = Park.create(baseContent, 'meadow', 3, 'Bridge Park');
   const ws = new WebSocket(base.replace('http', 'ws') + '/ws/bridge');
+  ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', ...(resume ?? {}) })));
+  let secret = '';
   const code = await new Promise<string>((resolve) => {
     ws.on('message', (data) => {
       const m = JSON.parse(String(data));
-      if (m.type === 'paired') resolve(m.code);
+      if (m.type === 'paired') { secret = m.secret; resolve(m.code); }
       if (m.type === 'command') { const r = runCommand(park, m.command); ws.send(JSON.stringify({ type: 'result', id: m.id, ok: r.ok, text: r.text })); }
     });
   });
-  return { park, ws, code };
+  return { park, ws, code, secret };
 }
 
 describe('park bridge', () => {
@@ -78,5 +80,35 @@ describe('park bridge', () => {
     const r = await fetch(`${base}/api/bridge/${code}/command`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'park' }) });
     expect(r.status).toBe(404);
     expect((await fetch(`${base}/mcp/short`, { method: 'POST' })).status).toBe(404);
+  });
+
+  it('review: an oversized frame closes that socket instead of crashing the server', async () => {
+    const ws = new WebSocket(base.replace('http', 'ws') + '/ws/bridge');
+    await new Promise((r) => ws.on('open', r));
+    ws.send('x'.repeat(70_000));
+    await new Promise((r) => ws.on('close', r));
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
+  });
+
+  it('review: refuses sockets opened by other sites', async () => {
+    const ws = new WebSocket(base.replace('http', 'ws') + '/ws/bridge', { headers: { origin: 'https://evil.example' } });
+    const outcome = await new Promise((r) => { ws.on('open', () => r('open')); ws.on('error', () => r('refused')); });
+    expect(outcome).toBe('refused');
+  });
+
+  it('review: a reconnecting tab keeps its link (so Claude Code config survives a deploy)', async () => {
+    const first = await fakeTab();
+    first.ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+    const again = await fakeTab({ code: first.code, secret: first.secret });
+    expect(again.code).toBe(first.code);
+    const r = (await (await fetch(`${base}/api/bridge/${again.code}/command`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'park' }) })).json()) as any;
+    expect(r.ok).toBe(true);
+    // A wrong secret gets a fresh code instead.
+    again.ws.close();
+    await new Promise((r) => setTimeout(r, 50));
+    const thief = await fakeTab({ code: first.code, secret: 'guess' });
+    expect(thief.code).not.toBe(first.code);
+    thief.ws.close();
   });
 });
