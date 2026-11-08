@@ -11,6 +11,7 @@ import { z } from 'zod';
 import type { Cache } from './cache.ts';
 import type { BridgeReply, Relay } from './relay.ts';
 import { clientIp } from './parks.ts';
+import { claudeTerminalEnabled } from './claude.ts';
 
 const CODE_RE = /^[a-z2-7]{26}$/;
 /** The tab gets 15 s; whoever waits for the relay gets a little longer, so the tab's own timeout reply arrives. */
@@ -45,7 +46,8 @@ export function attachBridge(server: Server, relay: Relay, cache: Cache) {
   let total = 0;
   server.on('upgrade', (req, socket, head) => {
     const p = (req.url ?? '').split('?')[0];
-    if (p === '/ws/claude') return; // handled by the (local-only) Claude terminal
+    // Handled by the local-only Claude terminal when it's on; otherwise refuse it here (never leave it hanging).
+    if (p === '/ws/claude' && claudeTerminalEnabled()) return;
     if (p !== '/ws/bridge' || !sameOrigin(req)) { socket.destroy(); return; }
     const ip = clientIp(req);
     if (total >= MAX_SOCKETS || (perIp.get(ip) ?? 0) >= MAX_PER_IP) { socket.destroy(); return; }
