@@ -19,6 +19,7 @@
     "@parkwright/content": "workspace:*",
     "@parkwright/sim": "workspace:*",
     "redis": "6.3.1",
-    "@parkwright/chain": "workspace:*"
+    "@parkwright/chain": "workspace:*",
+    "@parkwright/ai": "workspace:*"
   }
 }

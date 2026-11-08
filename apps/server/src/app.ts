@@ -1,18 +1,21 @@
 import { createServer, type Server } from 'node:http';
 import { handleParks, type Deps } from './parks.ts';
+import { handleAi } from './ai.ts';
+import type { NearAiClient } from '@parkwright/ai';
 import { serveStatic } from './static.ts';
 
-export function createApp(deps: Deps, opts: { webDist: string; version: string }): Server {
+export function createApp(deps: Deps & { ai?: NearAiClient }, opts: { webDist: string; version: string }): Server {
   const statics = serveStatic(opts.webDist);
   return createServer(async (req, res) => {
     try {
       const path = (req.url ?? '/').split('?')[0];
       if (path === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler }));
+        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler, ai: deps.ai?.model ?? null }));
         return;
       }
       if (path.startsWith('/api/')) {
+        if (await handleAi(req, res, path, { ai: deps.ai, cache: deps.cache })) return;
         if (await handleParks(req, res, path, deps)) return;
         res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'not found' }));
         return;

@@ -3,6 +3,7 @@ import { createApp } from './app.ts';
 import { Layered, MemoryCache, RedisCache, type Cache } from './cache.ts';
 import { CosmosStore, FileStore, type Store } from './store.ts';
 import { Settler, type ChainApi } from './settle.ts';
+import { NearAiClient } from '@parkwright/ai';
 
 const PORT = Number(process.env.PORT ?? 8790);
 const WEB_DIST = resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname);
@@ -51,7 +52,9 @@ if (settler) {
   // Budgets are topped up on their own schedule (not only after a pass that settled something).
   setInterval(() => { settler.refill().catch((e) => console.error('[settle]', e)); }, Number(process.env.REFILL_MS ?? 300_000)).unref();
 }
-const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark }, { webDist: WEB_DIST, version: VERSION });
+// NEAR AI Cloud (TEE): the park manager and mod designer. Off unless the server has an API key.
+const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_KEY, process.env.NEARAI_MODEL ?? 'Qwen/Qwen3.6-35B-A3B-FP8') : undefined;
+const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai }, { webDist: WEB_DIST, version: VERSION });
 // Don't let slow clients hold connections open (defaults are 300 s / 60 s).
 server.requestTimeout = 30_000;
 server.headersTimeout = 10_000;

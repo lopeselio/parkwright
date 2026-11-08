@@ -1,7 +1,7 @@
 // /api/parks — cloud saves you can share. Anyone can view a park by id; only the holder of its key can overwrite it.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { baseContent } from '@parkwright/content';
+import { basePack, buildContent, validateMod, type Content } from '@parkwright/content';
 import { computeRating, parkValue, type ParkState } from '@parkwright/sim';
 import type { Cache, Layered } from './cache.ts';
 import { ConflictError, validId, type ParkDoc, type Store } from './store.ts';
@@ -44,17 +44,30 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/** The content a save was built with: the base pack plus its own mods, re-validated here (untrusted). */
+export function contentFor(save: any): Content {
+  const packs = [basePack];
+  for (const m of Array.isArray(save?.mods) ? save.mods.slice(0, 8) : []) {
+    try {
+      const { mod } = validateMod({ name: m?.pack?.name, summary: m?.summary, rideTypes: m?.pack?.rideTypes, items: m?.pack?.items, rules: m?.rules }, buildContent(packs));
+      if (!packs.some((p) => p.id === mod.pack.id)) packs.push(mod.pack);
+    } catch { /* an unusable mod contributes nothing; its rides then fail the check below */ }
+  }
+  return buildContent(packs);
+}
+
 /** Why a save can't be stored (wrong shape, unknown content), or null. */
 export function checkSave(save: any): string | null {
   if (!save || save.v !== 1 || !save.snapshot || typeof save.snapshot !== 'object' || !Array.isArray(save.log)) return 'not a Parkwright v1 save';
   const s = save.snapshot as ParkState;
   if (s.version !== 1 || !Array.isArray(s.tiles) || !Array.isArray(s.rides) || !Array.isArray(s.visitors)) return 'malformed park state';
   // hasOwn: plain lookups would accept "constructor" or "__proto__" as content ids.
-  if (typeof s.scenario !== 'string' || !Object.hasOwn(baseContent.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
+  const content = contentFor(save);
+  if (typeof s.scenario !== 'string' || !Object.hasOwn(content.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
   if (!Number.isInteger(s.w) || !Number.isInteger(s.h) || s.tiles.length !== s.w * s.h) return 'map size does not match';
   if (s.rides.some((r) => !r || typeof r !== 'object' || typeof r.type !== 'string')) return 'malformed rides';
   if (s.visitors.some((v) => !v || typeof v !== 'object')) return 'malformed visitors';
-  const bad = s.rides.find((r) => !Object.hasOwn(baseContent.rideTypes, r.type));
+  const bad = s.rides.find((r) => !Object.hasOwn(content.rideTypes, r.type));
   if (bad) return `unknown ride type "${bad.type}"`;
   return null;
 }
@@ -68,8 +81,9 @@ function summary(save: any) {
   const s = save.snapshot as ParkState;
   const clamp = (n: number, lo: number, hi: number) => (Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : lo);
   let rating = 0, value = 0;
-  try { rating = computeRating(s, baseContent); } catch { /* malformed internals: rank it at the bottom */ }
-  try { value = parkValue(s, baseContent); } catch { /* summary only */ }
+  const content = contentFor(save);
+  try { rating = computeRating(s, content); } catch { /* malformed internals: rank it at the bottom */ }
+  try { value = parkValue(s, content); } catch { /* summary only */ }
   return { rating: clamp(rating, 0, 1000), value: clamp(value, 0, 999_999_999), visitors: clamp(s.visitors.length, 0, 100_000), day: clamp(s.day, 0, 100_000), scenario: s.scenario };
 }
 
