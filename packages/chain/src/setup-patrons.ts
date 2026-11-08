@@ -45,8 +45,10 @@ for (const account of PATRONS) {
     await near
       .transaction(ADMIN)
       .createAccount(account)
-      .transfer(account, '0.15 NEAR')
-      .addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['settle_day'], allowance: '0.12 NEAR' })
+      .transfer(account, '0.3 NEAR')
+      // No allowance: the key may spend the account's own (small) NEAR balance on gas. A lifetime allowance
+      // would silently stop settlement after a few hundred calls, and a function-call-only account can't be rekeyed.
+      .addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['settle_day'] })
       .send({ waitUntil: 'FINAL' });
     saveKey(account, key.publicKey.toString(), key.secretKey);
     console.log(`created ${account} (function-call key for settle_day only)`);
@@ -71,12 +73,14 @@ if (!existsSync(serverKeyFile)) {
   const key = generateKey();
   await near
     .transaction(ADMIN)
-    .addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons'], allowance: '1 NEAR' })
+    .addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons'] })
     .send({ waitUntil: 'FINAL' });
   saveKey(ADMIN, key.publicKey.toString(), key.secretKey, `${ADMIN}.server-key.json`);
   console.log(`added the server's admin function-call key → ${serverKeyFile}`);
 }
 
+const missing = PATRONS.filter((a) => !existsSync(join(credDir, `${a}.json`)));
+if (missing.length) throw new Error(`no local key for ${missing.join(', ')} — these accounts exist on chain but their key files are gone; create new patron accounts`);
 const keys = Object.fromEntries(PATRONS.map((a) => [a, JSON.parse(readFileSync(join(credDir, `${a}.json`), 'utf8')).private_key]));
 console.log(`\nFor the hosted server (Azure secrets), from ${credDir}:`);
 console.log(`  PARK_ADMIN_KEY  = private_key in ${ADMIN}.server-key.json`);
