@@ -146,7 +146,7 @@ export class Hud {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
-    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
+    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
     if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
@@ -225,6 +225,8 @@ export class Hud {
       const link = this.cloud.link;
       side.replaceChildren(
         h('header', {}, h('h2', {}, 'Parks'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
+        this.game.visiting ? h('div', { class: 'row' }, h('span', { class: 'muted' }, "You're playing a copy of someone else's park. Your own park is safe."),
+          h('button', { onclick: () => { if (!this.cloud.home()) toast('no saved park of your own yet', 'err'); this.last = ''; this.renderTop(); this.renderSide(); } }, 'Back to my park')) : '',
         h('p', { class: 'muted' }, link ? `Your park is in the cloud and saves itself every day. ${this.cloud.status}` : 'Publish your park to get a link anyone can open. It keeps saving itself every day.'),
         h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => {
           try {

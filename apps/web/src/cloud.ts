@@ -20,13 +20,24 @@ export class Cloud {
   /** Set when the cloud copy is newer (another tab or device): we stop overwriting it. */
   conflict = false;
   status = '';
+  private inFlight: Promise<void> | null = null;
+  private dirty = false;
+  /** Don't retry before this time after an error (doubles each failure, up to 10 min). */
+  private retryAt = 0;
+  private backoff = 15_000;
 
   constructor(private game: Game) {
-    game.on((e) => { if (e.kind === 'day' && this.link && !this.conflict) void this.sync(); });
+    game.on((e) => { if (e.kind === 'day') void this.sync(); });
+  }
+
+  /** Your own park is the one that syncs; visiting someone else's never touches your link. */
+  private get canSync() {
+    return !!this.link && !this.conflict && !this.game.visiting;
   }
 
   async publish(): Promise<string> {
-    if (this.link) { await this.sync(); return shareUrl(this.link.id); }
+    if (this.game.visiting) throw new Error("you're visiting someone else's park — go back to yours to share it");
+    if (this.link) { await this.sync(true); return shareUrl(this.link.id); }
     const res = await fetch('/api/parks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: this.game.s.name, save: this.game.toSave() }) });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `couldn't publish (${res.status})`);
@@ -36,33 +47,64 @@ export class Cloud {
     return shareUrl(body.id);
   }
 
-  async sync(): Promise<void> {
-    if (!this.link) return;
-    const res = await fetch(`/api/parks/${this.link.id}`, {
+  /** One upload at a time; a sync requested meanwhile sends the latest save when the current one ends. */
+  async sync(force = false): Promise<void> {
+    if (!this.canSync) return;
+    if (!force && Date.now() < this.retryAt) return;
+    if (this.inFlight) { this.dirty = true; return this.inFlight; }
+    this.inFlight = this.upload().finally(() => { this.inFlight = null; });
+    await this.inFlight;
+    if (this.dirty) { this.dirty = false; await this.sync(); }
+  }
+
+  private async upload() {
+    const link = this.link!;
+    const res = await fetch(`/api/parks/${link.id}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-park-key': this.link.key },
-      body: JSON.stringify({ name: this.game.s.name, save: this.game.toSave(), version: this.link.version }),
+      headers: { 'content-type': 'application/json', 'x-park-key': link.key },
+      body: JSON.stringify({ name: this.game.s.name, save: this.game.toSave(), version: link.version }),
     }).catch(() => null);
-    if (!res) { this.status = 'offline — will retry tomorrow'; return; }
+    if (!res) return this.fail('offline');
     const body = await res.json().catch(() => ({}));
-    if (res.status === 409) { this.conflict = true; this.status = 'a newer save exists in the cloud — not overwriting it'; return; }
-    if (!res.ok) { this.status = body.error ?? `cloud save failed (${res.status})`; return; }
-    this.link.version = body.version;
-    write(this.link);
+    if (res.status === 409) { this.conflict = true; this.status = 'a newer save exists in the cloud — not overwriting it. Open your share link to continue from it.'; return; }
+    if (!res.ok) return this.fail(body.error ?? `cloud save failed (${res.status})`);
+    link.version = body.version;
+    write(link);
+    this.backoff = 15_000;
+    this.retryAt = 0;
     this.status = `saved to the cloud (v${body.version})`;
   }
 
-  /** Open a shared park. Your own link resumes it; anyone else's becomes a copy you can play. */
+  private fail(why: string) {
+    this.retryAt = Date.now() + this.backoff;
+    this.backoff = Math.min(this.backoff * 2, 600_000);
+    this.status = `${why} — will retry`;
+  }
+
+  /** Open a shared park. Your own link resumes it; anyone else's becomes a copy (your park is kept). */
   async open(id: string): Promise<'own' | 'copy'> {
-    const res = await fetch(`/api/parks/${encodeURIComponent(id)}`);
+    const own = this.link?.id === id;
+    // The owner reads past the per-server cache so they always continue from the newest version.
+    const res = await fetch(`/api/parks/${encodeURIComponent(id)}${own ? '?fresh=1' : ''}`);
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `couldn't load that park (${res.status})`);
-    this.game.load(body.save as SaveFile);
-    if (this.link?.id === id) { this.link.version = body.version; write(this.link); this.conflict = false; return 'own'; }
-    // Visiting someone else's park: play a copy, and don't keep syncing to your own old link.
-    this.link = null;
-    write(null);
+    const why = this.game.incompatible(body.save as SaveFile);
+    if (why) throw new Error(`can't open that park: ${why}`);
+    if (own) {
+      this.game.visiting = false;
+      this.game.load(body.save as SaveFile);
+      this.link!.version = body.version;
+      write(this.link);
+      this.conflict = false;
+      return 'own';
+    }
+    this.game.visit(body.save as SaveFile);
     return 'copy';
+  }
+
+  /** Leave a visited park and return to your own. */
+  home(): boolean {
+    return this.game.goHome();
   }
 
   async leaderboard(): Promise<{ id: string; name: string; rating: number; value: number; visitors: number; day: number }[]> {
