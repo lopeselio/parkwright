@@ -39,3 +39,34 @@ describe('pw terminal', () => {
     for (const k of ['ride build', 'path place', 'staff hire', 'finance', 'visitors thoughts']) expect(h).toContain(k);
   });
 });
+
+describe('ride place', () => {
+  it('finds room, builds, connects to the paths and opens the ride', async () => {
+    const { Park: P, runCommand: run, Routes } = await import('../src/index.ts');
+    const p = P.create(c, 'meadow', 1);
+    for (const t of ['swings', 'carousel', 'lemonade-stand', 'droptower']) {
+      const r = run(p, `ride place ${t}`);
+      expect(r.ok, r.text).toBe(true);
+    }
+    // every ride is reachable from the gate along paths
+    const routes = new Routes(() => p.s);
+    for (const r of p.s.rides) expect(Routes.dist(p.s, routes.toRide(r), p.s.gate[0], p.s.gate[1])).toBeGreaterThanOrEqual(0);
+    expect(p.s.rides.filter((r) => r.status === 'open')).toHaveLength(4);
+  });
+
+  it('replays exactly (it is just ordinary actions)', async () => {
+    const { Park: P, runCommand: run } = await import('../src/index.ts');
+    const p = P.create(c, 'meadow', 9);
+    run(p, 'ride place teacups --near 20,30');
+    p.advanceTo(600);
+    expect(P.replay(c, 'meadow', 9, p.log, p.s.tick, 'My Park').hash()).toBe(p.hash());
+  });
+});
+
+describe('ride type names', () => {
+  it('resolves ids the way people type them', async () => {
+    const { findRideType } = await import('../src/index.ts');
+    for (const [typed, id] of [['swing', 'swings'], ['lemonade_stand', 'lemonade-stand'], ['Drop Tower', 'droptower'], ['plummet tower', 'droptower'], ['Brass Carousel', 'carousel'], ['noodle', 'noodle-bar']] as const) expect(findRideType(c, typed), typed).toBe(id);
+    expect(findRideType(c, 'zeppelin')).toBeUndefined();
+  });
+});

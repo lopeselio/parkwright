@@ -5,6 +5,7 @@ import { parkValue, valueForMoney } from './economy.ts';
 import { LEVEL_M, PIECES } from './coaster.ts';
 import { idx, queueCapacity, SCENERY } from './map.ts';
 import type { Park } from './park.ts';
+import { placeRide } from './place.ts';
 import { DAYS_PER_SEASON, DAYS_PER_WEEK, Tile, type LedgerCategory } from './types.ts';
 
 export interface CliResult {
@@ -168,6 +169,19 @@ export const COMMANDS: Record<string, Cmd> = {
         ...[...why].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `  ${n}× "${k}"`),
       ];
       return { ok: true, text: lines.join('\n'), focus: { x: r.x, y: r.y, label: r.name }, json: r };
+    },
+  },
+  'ride place': {
+    usage: 'ride place <type> [--near x,y]', summary: 'Find room near the paths, build, and lay a path to the entrance (easiest way to add a ride)',
+    run(park, pos, f) {
+      if (!pos[0]) return { ok: false, text: '✗ missing ride type\n  usage: pw ride place <type> [--near x,y]' };
+      let near: { x: number; y: number } | undefined;
+      if (typeof f.near === 'string') { const [x, y] = f.near.split(',').map(Number); if (Number.isInteger(x) && Number.isInteger(y)) near = { x, y }; }
+      const r = placeRide(park, pos[0], near);
+      if (!r.ok) return { ok: false, text: `✗ ${r.message}` };
+      const t = park.c.rideTypes[park.s.rides.find((x) => x.id === r.rideId)!.type];
+      if (t.kind === 'flat' && r.rideId) park.run('ride.open', { ride: r.rideId }, 'terminal');
+      return { ok: true, text: `✓ ${r.message}${t.kind === 'flat' ? ' — and opened it' : ''}`, focus: r.focus, json: { id: r.rideId } };
     },
   },
   'ride build': {

@@ -59,6 +59,29 @@ export function findRide(s: ParkState, ref: unknown): Ride | undefined {
   return undefined;
 }
 
+/**
+ * Resolve a ride type the way people (and models) type it: exact id, display name, underscores/spaces
+ * for dashes, a unique prefix or a whole word of the name ("swing" → swings, "lemonade_stand",
+ * "drop tower" → droptower). Deterministic for given content, so replays resolve the same way.
+ */
+export function findRideType(c: Content, ref: unknown): string | undefined {
+  const raw = String(ref ?? '').trim().toLowerCase();
+  if (!raw) return undefined;
+  const types = Object.values(c.rideTypes);
+  if (c.rideTypes[raw]) return raw;
+  const dashed = raw.replace(/[\s_]+/g, '-');
+  if (c.rideTypes[dashed]) return dashed;
+  const squashed = raw.replace(/[\s_-]+/g, '');
+  const byName = types.find((t) => t.name.toLowerCase() === raw || t.name.toLowerCase().replace(/\s+/g, '') === squashed);
+  if (byName) return byName.id;
+  const pre = types.filter((t) => t.id.startsWith(dashed) || t.id.replace(/-/g, '').startsWith(squashed));
+  if (pre.length === 1) return pre[0].id;
+  const word = types.filter((t) => t.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(raw)));
+  if (word.length === 1) return word[0].id;
+  const stem = types.filter((t) => t.id.replace(/-/g, '').startsWith(squashed.replace(/s$/, '')));
+  return stem.length === 1 ? stem[0].id : undefined;
+}
+
 function rideHint(s: ParkState) {
   return s.rides.length ? `rides: ${s.rides.map((r) => r.name).join(', ')}` : 'no rides built yet';
 }
@@ -128,7 +151,16 @@ def({
     for (const [x, y] of tiles) {
       if (!inBounds(s, x, y)) return fail(`${x},${y} is off the map`, `the map is ${s.w}×${s.h} (0–${s.w - 1}, 0–${s.h - 1})`);
       const k = idx(s, x, y);
-      if (s.occ[k]) return fail(`${x},${y} is taken by ${s.rides.find((r) => r.id === s.occ[k])?.name}`);
+      if (s.occ[k]) {
+        const r = s.rides.find((q) => q.id === s.occ[k]);
+        if (r && x === r.ex && y === r.ey) {
+          // Laying path *on* an entrance is a common mistake: point at a free tile next to it instead.
+          const free = [0, 1, 2, 3].map((d) => [r.ex + [0, 1, 0, -1][d], r.ey + [-1, 0, 1, 0][d]] as [number, number])
+            .find(([fx, fy]) => inBounds(s, fx, fy) && (isPath(s, fx, fy) || freeCell(s, fx, fy)));
+          return fail(`${x},${y} is the entrance of ${r.name}`, free ? `lay path on a tile next to it, e.g. ${free[0]},${free[1]}, and on to an existing path` : 'every tile around it is blocked — clear one');
+        }
+        return fail(`${x},${y} is taken by ${r?.name}`);
+      }
       if (s.tiles[k] !== want) n++;
     }
     if (n === 0) return fail('those tiles are already that kind of path');
@@ -172,7 +204,7 @@ def({
 
 function placement(ctx: Ctx, p: any) {
   const { s, c } = ctx;
-  const t = c.rideTypes[String(p.type)];
+  const t = c.rideTypes[findRideType(c, p.type) ?? ''];
   if (!t) {
     const ids = Object.values(c.rideTypes).filter((r) => r.kind !== 'track').map((r) => r.id);
     return { err: fail(`unknown ride type "${p.type}"`, `try one of: ${ids.join(', ')}`) };
@@ -226,7 +258,9 @@ def({
     if (!isPath(s, pl.ex, pl.ey)) s.occ[idx(s, pl.ex, pl.ey)] = id;
     s.rides.push(ride);
     s.mapVersion++;
-    return { ok: true, cost: pl.t.cost, focus: { x: pl.x, y: pl.y, label: ride.name }, data: { id }, message: `built ${ride.name} (#${id})${pl.t.kind === 'flat' ? ' — it is closed; open it when ready' : ''}` };
+    const linked = isPath(s, pl.ex, pl.ey) || [0, 1, 2, 3].some((d) => isPath(s, pl.ex + [0, 1, 0, -1][d], pl.ey + [-1, 0, 1, 0][d]));
+    const where = `entrance at ${pl.ex},${pl.ey}${linked ? ', touching a path' : ' — no path touches it yet'}`;
+    return { ok: true, cost: pl.t.cost, focus: { x: pl.x, y: pl.y, label: ride.name }, data: { id }, message: `built ${ride.name} (#${id}), ${where}${pl.t.kind === 'flat' ? '; it is closed — open it when ready' : ''}` };
   },
 });
 
