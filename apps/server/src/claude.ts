@@ -37,7 +37,8 @@ export function isLocalRequest(req: IncomingMessage, requireOrigin = false): boo
 function claudeEnv(): NodeJS.ProcessEnv {
   const keep = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'XDG_CONFIG_HOME'];
   const env: NodeJS.ProcessEnv = { TERM: 'xterm-256color' };
-  for (const [k, v] of Object.entries(process.env)) if (keep.includes(k) || k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_')) env[k] = v;
+  // Auth/config only — not CLAUDE_CODE_* session markers inherited from whatever launched this server.
+  for (const [k, v] of Object.entries(process.env)) if (keep.includes(k) || k.startsWith('ANTHROPIC_') || k === 'CLAUDE_CONFIG_DIR') env[k] = v;
   return env;
 }
 
@@ -101,9 +102,10 @@ async function session(ws: WebSocket, relay: Relay, port: number, repoRoot: stri
     '--permission-mode', 'default',
     // Pre-approved: the park's tools, and file access inside this folder only (./** is relative to the cwd).
     // Anything else — other paths included — still asks the player in the terminal.
-    '--allowedTools', 'mcp__parkwright__pw', 'mcp__parkwright__park_overview', 'mcp__parkwright__mod_apply', 'Read(./**)', 'Write(./**)', 'Edit(./**)',
+    // (Edit rules cover every file write, Write included — Claude Code warns that Write(...) patterns never match.)
+    '--allowedTools', 'mcp__parkwright__pw', 'mcp__parkwright__park_overview', 'mcp__parkwright__mod_apply', 'Read(./**)', 'Edit(./**)',
     // Never: a shell, the web, or rewriting Claude's own settings for this folder.
-    '--disallowedTools', 'Bash', 'WebFetch', 'WebSearch', 'Write(./.claude/**)', 'Edit(./.claude/**)',
+    '--disallowedTools', 'Bash', 'WebFetch', 'WebSearch', 'Edit(./.claude/**)',
     '--append-system-prompt', GUIDE,
   ];
   // A real terminal without native Node modules: a tiny Python pty helper (python3 ships with macOS).
