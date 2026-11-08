@@ -3,6 +3,8 @@ import { Park, type ActionRecord, type ActionResult, type ParkEvent, type ParkSt
 
 export const TICK_MS = 50; // 20 ticks per second at 1×
 const SAVE_KEY = 'parkwright.save.v1';
+/** A park you're visiting autosaves here, so your own park's save is never touched. */
+const VISIT_KEY = 'parkwright.save.v1.visit';
 const BACKUP_KEY = 'parkwright.save.v1.backup';
 /** Keep the newest actions only; the snapshot already holds the result of older ones. */
 const MAX_LOG = 5000;
@@ -46,6 +48,23 @@ export class Game {
     this.saveLocal();
   }
 
+  /** Play a copy of someone else's park without touching your own save. */
+  visit(save: SaveFile) {
+    if (!this.visiting) this.saveLocal(); // make sure your park is saved before switching away
+    this.load(save);
+    this.visiting = true;
+  }
+
+  /** Go back to your own park (from its local save). Returns false if there is none. */
+  goHome(): boolean {
+    this.visiting = false;
+    const p = this.loadLocal();
+    if (!p) return false;
+    this.park = p;
+    this.wire();
+    return true;
+  }
+
   load(save: SaveFile) {
     const why = this.incompatible(save);
     if (why) throw new Error(why);
@@ -58,8 +77,9 @@ export class Game {
   incompatible(save: SaveFile): string | null {
     if (save?.v !== 1 || !save.snapshot) return 'not a Parkwright v1 save';
     const s = save.snapshot;
-    if (!this.content.scenarios[s.scenario]) return `unknown scenario "${s.scenario}"`;
-    const missing = s.rides.map((r) => r.type).filter((t) => !this.content.rideTypes[t]);
+    if (typeof s.scenario !== 'string' || !Object.hasOwn(this.content.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
+    if (!Array.isArray(s.rides) || s.rides.some((r) => !r || typeof r.type !== 'string')) return 'malformed rides';
+    const missing = s.rides.map((r) => r.type).filter((t) => !Object.hasOwn(this.content.rideTypes, t));
     if (missing.length) return `this save needs ride types that aren't loaded: ${[...new Set(missing)].join(', ')}`;
     return null;
   }
@@ -84,9 +104,12 @@ export class Game {
     return { v: 1, snapshot: this.park.snapshot(), log: this.park.log.slice(-MAX_LOG), savedAt: Date.now() };
   }
 
+  /** True while playing a copy of someone else's park. */
+  visiting = false;
+
   saveLocal() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(this.toSave()));
+      localStorage.setItem(this.visiting ? VISIT_KEY : SAVE_KEY, JSON.stringify(this.toSave()));
       this.saveError = null;
     } catch (e) {
       this.saveError = `couldn't save: ${(e as Error).name === 'QuotaExceededError' ? 'browser storage is full' : (e as Error).message}`;
