@@ -8,6 +8,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/content/package.json packages/content/
 COPY packages/sim/package.json packages/sim/
 COPY packages/chain/package.json packages/chain/
+COPY packages/ai/package.json packages/ai/
 COPY apps/web/package.json apps/web/
 COPY apps/server/package.json apps/server/
 
@@ -27,6 +28,7 @@ COPY --from=prod-deps /app/node_modules /app/node_modules
 COPY --from=prod-deps /app/apps/server/node_modules /app/apps/server/node_modules
 COPY --from=prod-deps /app/packages/sim/node_modules /app/packages/sim/node_modules
 COPY --from=prod-deps /app/packages/chain/node_modules /app/packages/chain/node_modules
+COPY --from=prod-deps /app/packages/ai/node_modules /app/packages/ai/node_modules
 COPY package.json /app/
 COPY packages/content/package.json /app/packages/content/
 COPY packages/content/src /app/packages/content/src
@@ -34,6 +36,8 @@ COPY packages/sim/package.json /app/packages/sim/
 COPY packages/sim/src /app/packages/sim/src
 COPY packages/chain/package.json /app/packages/chain/
 COPY packages/chain/src /app/packages/chain/src
+COPY packages/ai/package.json /app/packages/ai/
+COPY packages/ai/src /app/packages/ai/src
 COPY apps/server/package.json /app/apps/server/
 COPY apps/server/src /app/apps/server/src
 COPY --from=build /app/apps/web/dist /app/web
