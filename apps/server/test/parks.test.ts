@@ -136,3 +136,15 @@ describe('review regressions', () => {
     expect(await l2.get('k')).toBe('v6');
   });
 });
+
+describe('modded parks', () => {
+  it('rank on their own board', async () => {
+    const save: any = saveOf(4);
+    save.mods = [{ pack: { name: 'Tiny', rideTypes: [{ id: 'mini', name: 'Mini', kind: 'flat' }], items: [] }, summary: '', rules: [] }];
+    const r = (await (await call('POST', '/api/parks', { name: 'Modded', save })).json()) as any;
+    const vanilla = (await (await call('GET', '/api/leaderboard')).json()) as any;
+    const modded = (await (await call('GET', '/api/leaderboard?modded=1')).json()) as any;
+    expect(vanilla.parks.some((p: any) => p.id === r.id)).toBe(false);
+    expect(modded.parks.some((p: any) => p.id === r.id)).toBe(true);
+  });
+});

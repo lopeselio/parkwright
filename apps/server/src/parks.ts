@@ -12,6 +12,9 @@ const WRITES_PER_MIN = 30;
 /** Across all clients, per replica window — a backstop if per-IP limiting is ever fooled. */
 const CREATES_PER_MIN = 300;
 const BOARD = 'board:rating';
+/** Modded parks rank on their own board: mods change costs and ratings, so they can't compete fairly. */
+const boardOf = (d: { modded?: boolean }) => (d.modded ? `${BOARD}:modded` : BOARD);
+const baseOnly = buildContent([basePack]);
 const CHAIN_CONTRACT = process.env.PARK_CONTRACT_ID ?? 'park.parkwright.testnet';
 
 export interface Deps {
@@ -84,7 +87,8 @@ function summary(save: any) {
   const content = contentFor(save);
   try { rating = computeRating(s, content); } catch { /* malformed internals: rank it at the bottom */ }
   try { value = parkValue(s, content); } catch { /* summary only */ }
-  return { rating: clamp(rating, 0, 1000), value: clamp(value, 0, 999_999_999), visitors: clamp(s.visitors.length, 0, 100_000), day: clamp(s.day, 0, 100_000), scenario: s.scenario };
+  const modded = Object.keys(content.rideTypes).length !== Object.keys(baseOnly.rideTypes).length || (Array.isArray(save.mods) && save.mods.length > 0);
+  return { rating: clamp(rating, 0, 1000), value: clamp(value, 0, 999_999_999), visitors: clamp(s.visitors.length, 0, 100_000), day: clamp(s.day, 0, 100_000), scenario: s.scenario, modded };
 }
 
 const cleanName = (n: unknown) => String(n ?? 'My Park').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) || 'My Park';
@@ -113,7 +117,8 @@ const publicDoc = ({ ownerHash: _o, ...rest }: ParkDoc) => rest;
 export async function handleParks(req: IncomingMessage, res: ServerResponse, path: string, deps: Deps): Promise<boolean> {
   const { store, cache, docs } = deps;
   if (path === '/api/leaderboard' && req.method === 'GET') {
-    const top = await cache.ztop(BOARD, 20).catch(() => []);
+    const modded = new URL(req.url ?? '/', 'http://x').searchParams.has('modded');
+    const top = await cache.ztop(modded ? `${BOARD}:modded` : BOARD, 20).catch(() => []);
     const rows = await Promise.all(top.map(async ({ member }) => {
       const r = await docs.read(`park:${member}`, async () => { const d = await store.get(member); return d ? JSON.stringify(publicDoc(d)) : null; });
       if (!r.value) return null;
@@ -185,7 +190,7 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       }
       if (!doc) { json(res, 503, { error: 'could not allocate a park id' }); return true; }
       await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-      await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
+      await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
       if (deps.settler) void deps.settler.register(doc.id, doc.name).then(() => deps.settler!.markDirty(doc!.id));
       json(res, 201, { id: doc.id, key, version: doc.version });
       return true;
@@ -200,7 +205,9 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       throw e;
     }
     await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-    await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
+    // A park that gains or loses mods moves boards.
+    await cache.zrem(boardOf({ modded: !doc.modded }), doc.id).catch(() => {});
+    await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
     await deps.settler?.markDirty(doc.id);
     json(res, 200, { id: doc.id, version: doc.version });
     return true;
