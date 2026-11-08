@@ -3,7 +3,7 @@
 import { ACTIONS, findRide, type ActionResult, type Focus } from './actions.ts';
 import { parkValue, valueForMoney } from './economy.ts';
 import { LEVEL_M, PIECES } from './coaster.ts';
-import { idx, queueCapacity, SCENERY } from './map.ts';
+import { idx, queueCapacity, Routes, SCENERY } from './map.ts';
 import type { Park } from './park.ts';
 import { placeRide } from './place.ts';
 import { DAYS_PER_SEASON, DAYS_PER_WEEK, Tile, type LedgerCategory } from './types.ts';
@@ -136,7 +136,8 @@ export const COMMANDS: Record<string, Cmd> = {
         const t = c.rideTypes[r.type];
         const rt = r.ratings && (t.kind === 'flat' || t.kind === 'track') ? ` E${rating(r.ratings.e)} I${rating(r.ratings.i)} N${rating(r.ratings.n)} worth ~${cr(r.value)}` : '';
         const q = t.kind === 'stall' ? '' : ` queue ${r.queue.length}/${queueCapacity(s, r)}`;
-        return `#${r.id} ${r.name} [${r.status}] ${cr(r.price)}${rt}${q} rel ${Math.round(r.reliability / 100)}% · ${r.customers} customers, ${cr(r.income)} total`;
+        const reach = Routes.dist(s, park.routes.toRide(r), s.gate[0], s.gate[1]) >= 0 ? '' : ' ⚠ NOT REACHABLE from the gate — connect its entrance to the gate path';
+        return `#${r.id} ${r.name} [${r.status}] ${cr(r.price)}${rt}${q} rel ${Math.round(r.reliability / 100)}% · ${r.customers} customers, ${cr(r.income)} total${reach}`;
       });
       return { ok: true, text: rows.join('\n'), json: s.rides.map((r) => ({ id: r.id, name: r.name, type: r.type, status: r.status, price: r.price, value: r.value, ratings: r.ratings, queue: r.queue.length, reliability: r.reliability, customers: r.customers, income: r.income })) };
     },
@@ -160,7 +161,7 @@ export const COMMANDS: Record<string, Cmd> = {
       const why = new Map<string, number>();
       for (const v of park.s.visitors) for (const t of v.thoughts) if (t.ride === r.id) why.set(t.kind, (why.get(t.kind) ?? 0) + 1);
       const lines = [
-        `${r.name} (#${r.id}, ${park.c.rideTypes[r.type].name}) at ${r.x},${r.y}, entrance ${r.ex},${r.ey} — ${r.status}`,
+        `${r.name} (#${r.id}, ${park.c.rideTypes[r.type].name}) at ${r.x},${r.y}, entrance ${r.ex},${r.ey} — ${r.status}${Routes.dist(park.s, park.routes.toRide(r), park.s.gate[0], park.s.gate[1]) >= 0 ? '' : ' — ⚠ not reachable from the gate'}`,
         `Price ${cr(r.price)}; visitors value it at ~${cr(r.value)}${park.s.fee > 0 ? ' (half that, since they paid to get in)' : ''}.`,
         r.ratings ? `Excitement ${rating(r.ratings.e)}, intensity ${rating(r.ratings.i)}, nausea ${rating(r.ratings.n)}.` : r.track ? 'Not rated yet — close the circuit and run pw coaster test.' : 'Not rated.',
         ...(r.stats ? [`Track: ${r.stats.length} m, ${r.stats.duration} s, top speed ${r.stats.maxSpeed} m/s, ${r.stats.drops} drop(s) up to ${r.stats.maxDrop} m, ${r.stats.maxVertG}g/${r.stats.minVertG}g vertical, ${r.stats.maxLatG}g lateral, ${r.stats.airtime} s airtime.`] : []),
