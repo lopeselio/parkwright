@@ -152,6 +152,11 @@ Errors are guided: a refusal says what would be valid ("no path at 12,8; nearest
 - **AI manager:** a NEAR AI Cloud model in a TEE (attested), driven by a tool loop whose only tool is `pw`. It has a budget per day, set by the player. Every prompt and reply is signed, and you can check its proof bundle with `pnpm verify:manager`.
 - **Claude Code over MCP:** `packages/mcp` exposes `pw` as an MCP tool against a running server, so `claude mcp add parkwright …` can play your park.
 
+**As built (2026-11):**
+- `POST /api/ai/manager` relays a turn to NEAR AI (JSON mode): `{say, commands ≤5, done}` plus the proof bundle. The browser runs the commands against its own park and feeds the results back, up to 8 turns, stopping at the player's `--budget`.
+- `GET /api/ai/attestation` returns the signing keys from the model's attestation report.
+- Limits: 12 manager and 4 mod calls per minute per client, and a server-wide daily cap (`AI_DAILY_CALLS`, default 400), because NEAR AI credits are finite.
+
 ### 8.1 The modding terminal
 
 The terminal can also make mods. You describe what you want, an AI writes the mod pack, and the game checks it before anything loads.
@@ -169,6 +174,7 @@ The terminal can also make mods. You describe what you want, an AI writes the mo
 - **What AI mods may contain:** data only, meaning ride types, items, scenery and scenarios, all checked against the content schema with sane bounds. Ratings, costs and capacities are clamped.
   - Behaviour changes use **declarative rules**, not code. For example, `{ "on": "ride.build", "when": { "type": "teacups" }, "cost": "×0.5" }` or `{ "on": "ride.build", "when": { "kind": "stall" }, "veto": "stalls are banned in this scenario" }`. The sim turns these into query hooks.
   - Hand-written local mods may also ship `hooks.js`, which runs in a Worker sandbox. AI output is never run as code.
+- **As built:** `validateMod` (content package) whitelists fields, clamps every number, namespaces ids as `mod-<name>--<id>` (a mod can never replace base content), checks item references, and keeps only rules of the form veto or cost ×0.1–5. `rulesToHooks` (sim) turns rules into query hooks. Mods are saved in `localStorage` and inside every save file, and re-validated on every load, including by the server for published parks.
 - **Assets:** a mod can name a model id. If no `.glb` exists, the client uses the procedural mesh tinted with the mod's colour. On a local install, the Claude terminal can also write a Blender script into `assets/blender/mods/` for `pnpm assets` to build.
 - **Persistence:** mods are stored by content hash (Cosmos DB hosted, `mods/` locally). Saves list the hashes they need, and a save won't load with a different version of a mod.
 

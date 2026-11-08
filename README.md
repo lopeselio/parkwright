@@ -23,3 +23,12 @@ Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEA
 - Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract.
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
 - Setup (once, by the owner): `cargo near deploy …` (see DESIGN §9), then `pnpm --filter @parkwright/chain setup:patrons`.
+
+## AI park manager and AI mods (NEAR AI, private inference)
+
+Both run on a TEE-attested model on NEAR AI Cloud. The model can only propose `pw` commands or a data-only mod, which the game validates like any player input. Your browser checks each reply's TEE signature itself: the signature must cover exactly that request and reply, and the signing key must be in the model's attestation report.
+
+- Do: open the terminal (`` ` ``) and type `ask "build a swing ride and a lemonade stand and connect them" --budget 3000`. See: the manager says what it's doing, runs `pw` commands, recovers from errors using the game's hints, and prints "🔏 signed in a TEE … verified here" for each turn.
+- Do: `mod ai "a haunted drop tower and a hot cocoa cart"`, then `mod apply`. See: the new ride and stall in the Rides and Stalls drawers and in `pw ride types`. Ids are namespaced and every number is clamped, so a mod can't break the game or replace base content. Published parks carry their mods, so visitors see them too.
+- Do: `ai proofs`. See: a JSON download with the exact signed request/response bytes and signatures, which anyone can re-check.
+- Do: `pw ride place teacups`. See: the game finds room near the paths, builds, connects the entrance and opens the ride (the manager uses this too).
