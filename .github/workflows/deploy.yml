@@ -1,0 +1,34 @@
+name: deploy
+# Ship main to Azure Container Apps once CI has passed on it.
+# Azure login uses OIDC (a federated credential on a deploy-only service principal), so no secrets are stored.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    # Skips (rather than fails) until scripts/setup-github-deploy.sh has set the Azure variables.
+    if: vars.AZURE_CLIENT_ID != '' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build in ACR, roll the app, wait for the new version
+        run: ./scripts/deploy-azure.sh
+        env:
+          SKIP_SETUP: '1'
