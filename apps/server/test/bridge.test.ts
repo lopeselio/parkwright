@@ -52,7 +52,7 @@ describe('park bridge', () => {
     const client = new Client({ name: 'test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${code}`)));
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name).sort()).toEqual(['park_overview', 'pw']);
+    expect(tools.tools.map((t) => t.name).sort()).toEqual(['mod_apply', 'park_overview', 'pw']);
     const r: any = await client.callTool({ name: 'pw', arguments: { command: 'ride place carousel' } });
     expect(r.isError).toBe(false);
     expect(r.content[0].text).toContain('built Brass Carousel');
@@ -110,5 +110,28 @@ describe('park bridge', () => {
     const thief = await fakeTab({ code: first.code, secret: 'guess' });
     expect(thief.code).not.toBe(first.code);
     thief.ws.close();
+  });
+
+  it('mod_apply sends the mod to the tab as one bounded command', async () => {
+    const seen: string[] = [];
+    const park = Park.create(baseContent, 'meadow', 3, 'Mod Park');
+    const ws = new WebSocket(base.replace('http', 'ws') + '/ws/bridge');
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'hello' })));
+    const code = await new Promise<string>((resolve) => ws.on('message', (data) => {
+      const m = JSON.parse(String(data));
+      if (m.type === 'paired') resolve(m.code);
+      if (m.type === 'command') { seen.push(m.command); ws.send(JSON.stringify({ type: 'result', id: m.id, ok: true, text: 'loaded' })); }
+    }));
+    void park;
+    const client = new Client({ name: 'test', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${code}`)));
+    const r: any = await client.callTool({ name: 'mod_apply', arguments: { mod: { name: 'Balloons', rideTypes: [{ id: 'b', kind: 'stall' }] } } });
+    expect(r.isError).toBe(false);
+    expect(seen[0].startsWith('mod load {')).toBe(true);
+    expect(JSON.parse(seen[0].slice('mod load '.length)).name).toBe('Balloons');
+    const big: any = await client.callTool({ name: 'mod_apply', arguments: { mod: { name: 'x'.repeat(25_000) } } });
+    expect(big.isError).toBe(true);
+    await client.close();
+    ws.close();
   });
 });
