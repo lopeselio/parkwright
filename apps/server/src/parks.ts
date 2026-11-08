@@ -2,12 +2,14 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { baseContent } from '@parkwright/content';
-import { parkValue, type ParkState } from '@parkwright/sim';
+import { computeRating, parkValue, type ParkState } from '@parkwright/sim';
 import type { Cache, Layered } from './cache.ts';
 import { ConflictError, validId, type ParkDoc, type Store } from './store.ts';
 
 export const MAX_BODY = 1_800_000; // under Cosmos' 2 MB item limit
 const WRITES_PER_MIN = 30;
+/** Across all clients, per replica window — a backstop if per-IP limiting is ever fooled. */
+const CREATES_PER_MIN = 300;
 const BOARD = 'board:rating';
 
 export interface Deps { store: Store; cache: Cache; docs: Layered }
@@ -34,28 +36,42 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 /** Why a save can't be stored (wrong shape, unknown content), or null. */
 export function checkSave(save: any): string | null {
-  if (!save || save.v !== 1 || typeof save.snapshot !== 'object' || !Array.isArray(save.log)) return 'not a Parkwright v1 save';
+  if (!save || save.v !== 1 || !save.snapshot || typeof save.snapshot !== 'object' || !Array.isArray(save.log)) return 'not a Parkwright v1 save';
   const s = save.snapshot as ParkState;
   if (s.version !== 1 || !Array.isArray(s.tiles) || !Array.isArray(s.rides) || !Array.isArray(s.visitors)) return 'malformed park state';
-  if (!baseContent.scenarios[s.scenario]) return `unknown scenario "${s.scenario}"`;
-  if (s.tiles.length !== s.w * s.h) return 'map size does not match';
-  const bad = s.rides.find((r) => !baseContent.rideTypes[r.type]);
+  // hasOwn: plain lookups would accept "constructor" or "__proto__" as content ids.
+  if (typeof s.scenario !== 'string' || !Object.hasOwn(baseContent.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
+  if (!Number.isInteger(s.w) || !Number.isInteger(s.h) || s.tiles.length !== s.w * s.h) return 'map size does not match';
+  if (s.rides.some((r) => !r || typeof r !== 'object' || typeof r.type !== 'string')) return 'malformed rides';
+  if (s.visitors.some((v) => !v || typeof v !== 'object')) return 'malformed visitors';
+  const bad = s.rides.find((r) => !Object.hasOwn(baseContent.rideTypes, r.type));
   if (bad) return `unknown ride type "${bad.type}"`;
   return null;
 }
 
+/**
+ * Leaderboard numbers are recomputed here from the park's contents (not taken from the client's own
+ * fields) and clamped to what the sim can produce. Saves are still client-made, so the board is
+ * "self-reported, sanity-checked" — full verification needs a replay from the start (see DESIGN).
+ */
 function summary(save: any) {
   const s = save.snapshot as ParkState;
-  let value = 0;
+  const clamp = (n: number, lo: number, hi: number) => (Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : lo);
+  let rating = 0, value = 0;
+  try { rating = computeRating(s, baseContent); } catch { /* malformed internals: rank it at the bottom */ }
   try { value = parkValue(s, baseContent); } catch { /* summary only */ }
-  return { rating: s.rating | 0, value, visitors: s.visitors.length, day: s.day | 0, scenario: s.scenario };
+  return { rating: clamp(rating, 0, 1000), value: clamp(value, 0, 999_999_999), visitors: clamp(s.visitors.length, 0, 100_000), day: clamp(s.day, 0, 100_000), scenario: s.scenario };
 }
 
 const cleanName = (n: unknown) => String(n ?? 'My Park').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40) || 'My Park';
 
-function clientIp(req: IncomingMessage) {
-  const xf = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-  return xf || req.socket.remoteAddress || 'unknown';
+/**
+ * The client address as seen by our ingress. Azure Container Apps' proxy appends the real peer to
+ * X-Forwarded-For, so the rightmost entry is trustworthy; anything to its left is client-supplied.
+ */
+export function clientIp(req: IncomingMessage) {
+  const parts = String(req.headers['x-forwarded-for'] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  return parts[parts.length - 1] || req.socket.remoteAddress || 'unknown';
 }
 
 function ownerOk(doc: ParkDoc, key: string | undefined) {
@@ -64,13 +80,16 @@ function ownerOk(doc: ParkDoc, key: string | undefined) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** Rating first, then park value (both clamped, so the score stays exact as a double). */
+const boardScore = (d: ParkDoc) => d.rating * 1e9 + d.value;
+
 /** The public view of a park: everything except the owner hash. */
 const publicDoc = ({ ownerHash: _o, ...rest }: ParkDoc) => rest;
 
 export async function handleParks(req: IncomingMessage, res: ServerResponse, path: string, deps: Deps): Promise<boolean> {
   const { store, cache, docs } = deps;
   if (path === '/api/leaderboard' && req.method === 'GET') {
-    const top = await cache.ztop(BOARD, 20);
+    const top = await cache.ztop(BOARD, 20).catch(() => []);
     const rows = await Promise.all(top.map(async ({ member }) => {
       const r = await docs.read(`park:${member}`, async () => { const d = await store.get(member); return d ? JSON.stringify(publicDoc(d)) : null; });
       if (!r.value) return null;
@@ -87,7 +106,8 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
 
   if (req.method === 'GET' && id) {
     if (!validId(id)) { json(res, 400, { error: 'bad park id' }); return true; }
-    const r = await docs.read(`park:${id}`, async () => { const d = await store.get(id); return d ? JSON.stringify(publicDoc(d)) : null; });
+    const fresh = new URL(req.url ?? '/', 'http://x').searchParams.has('fresh');
+    const r = await docs.read(`park:${id}`, async () => { const d = await store.get(id); return d ? JSON.stringify(publicDoc(d)) : null; }, fresh);
     if (!r.value) { json(res, 404, { error: 'no such park' }); return true; }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', 'x-cache': r.from });
     res.end(r.value);
@@ -97,6 +117,17 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
   if ((req.method === 'POST' && !id) || (req.method === 'PUT' && id)) {
     const n = await cache.incr(`rl:${clientIp(req)}`, 60).catch(() => 0);
     if (n > WRITES_PER_MIN) { json(res, 429, { error: 'too many saves — try again in a minute' }, { 'retry-after': '60' }); return true; }
+    // PUT: check the park and its key before reading a large body.
+    let cur: ParkDoc | null = null;
+    if (req.method === 'PUT') {
+      if (!validId(id!)) { json(res, 400, { error: 'bad park id' }); return true; }
+      cur = await store.get(id!);
+      if (!cur) { json(res, 404, { error: 'no such park' }); return true; }
+      if (!ownerOk(cur, String(req.headers['x-park-key'] ?? ''))) { json(res, 403, { error: 'only the owner can save over this park' }); return true; }
+    } else {
+      const all = await cache.incr('rl:creates', 60).catch(() => 0);
+      if (all > CREATES_PER_MIN) { json(res, 429, { error: 'the server is busy — try again in a minute' }, { 'retry-after': '60' }); return true; }
+    }
     let body: any;
     try { body = JSON.parse(await readBody(req)); } catch (e: any) { json(res, e?.status ?? 400, { error: e?.status ? e.message : 'body must be JSON' }); return true; }
     const why = checkSave(body?.save);
@@ -105,28 +136,29 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
 
     if (req.method === 'POST') {
       const key = newKey();
-      const doc: ParkDoc = { id: newId(), name: cleanName(body.name), ownerHash: sha(key), ...summary(body.save), save: body.save, createdAt: now, updatedAt: now, version: 1 };
-      await store.put(doc);
+      let doc: ParkDoc | null = null;
+      for (let attempt = 0; attempt < 3 && !doc; attempt++) {
+        const candidate: ParkDoc = { id: newId(), name: cleanName(body.name), ownerHash: sha(key), ...summary(body.save), save: body.save, createdAt: now, updatedAt: now, version: 1 };
+        try { await store.create(candidate); doc = candidate; }
+        catch (e) { if (!(e instanceof ConflictError)) throw e; } // id collision: pick another
+      }
+      if (!doc) { json(res, 503, { error: 'could not allocate a park id' }); return true; }
       await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-      await cache.zadd(BOARD, doc.rating * 1e9 + Math.min(doc.value, 1e9 - 1), doc.id).catch(() => {});
+      await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
       json(res, 201, { id: doc.id, key, version: doc.version });
       return true;
     }
 
-    if (!validId(id!)) { json(res, 400, { error: 'bad park id' }); return true; }
-    const cur = await store.get(id!);
-    if (!cur) { json(res, 404, { error: 'no such park' }); return true; }
-    if (!ownerOk(cur, String(req.headers['x-park-key'] ?? ''))) { json(res, 403, { error: 'only the owner can save over this park' }); return true; }
-    const expect = body.version === undefined ? undefined : Number(body.version);
-    const doc: ParkDoc = { ...cur, name: cleanName(body.name ?? cur.name), ...summary(body.save), save: body.save, updatedAt: now, version: cur.version + 1 };
+    const expect = body.version === undefined ? cur!.version : Number(body.version);
+    const doc: ParkDoc = { ...cur!, name: cleanName(body.name ?? cur!.name), ...summary(body.save), save: body.save, updatedAt: now, version: cur!.version + 1 };
     try {
-      await store.put(doc, expect ?? cur.version);
+      await store.put(doc, expect);
     } catch (e) {
-      if (e instanceof ConflictError) { json(res, 409, { error: 'a newer save exists', version: cur.version }); return true; }
+      if (e instanceof ConflictError) { json(res, 409, { error: 'a newer save exists', version: cur!.version }); return true; }
       throw e;
     }
     await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-    await cache.zadd(BOARD, doc.rating * 1e9 + Math.min(doc.value, 1e9 - 1), doc.id).catch(() => {});
+    await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
     json(res, 200, { id: doc.id, version: doc.version });
     return true;
   }
