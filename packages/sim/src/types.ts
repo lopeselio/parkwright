@@ -69,6 +69,10 @@ export interface Ride {
   satisfaction: number[];
   /** Coaster track, if kind = track. */
   track?: TrackPiece[];
+  /** Coaster test-run results (shown in the ride panel). */
+  stats?: import('./coaster.ts').CoasterStats;
+  /** Ticks per ride cycle for coasters (from the test run). */
+  cycleTicks?: number;
 }
 
 export interface TrackPiece {

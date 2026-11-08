@@ -44,7 +44,7 @@ export function updateRide(s: ParkState, c: Content, r: Ride, byId: Map<number, 
 }
 
 function trackCycle(r: Ride): number {
-  return 200 + (r.track?.length ?? 10) * 12;
+  return r.cycleTicks ?? 200 + (r.track?.length ?? 10) * 12;
 }
 
 /** Daily wear and a chance of breaking down. */
