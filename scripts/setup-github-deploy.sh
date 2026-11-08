@@ -17,10 +17,20 @@ fi
 az ad sp show --id "$APP_ID" -o none 2>/dev/null || az ad sp create --id "$APP_ID" -o none
 SP_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
 
+# GitHub may sign tokens with either subject format: the classic name-based one, or the newer one
+# with immutable owner/repo ids (repo:owner@ownerId/repo@repoId:...). Trust both, for this environment only.
+OWNER_ID=$(gh api "repos/$REPO" --jq .owner.id)
+REPO_ID=$(gh api "repos/$REPO" --jq .id)
 SUBJECT="repo:${REPO}:environment:production"
-if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SUBJECT'].name" -o tsv)" ]; then
-  az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\":\"github-production\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"$SUBJECT\",\"audiences\":[\"api://AzureADTokenExchange\"]}" -o none
-fi
+SUBJECT_IDS="repo:${REPO%%/*}@${OWNER_ID}/${REPO##*/}@${REPO_ID}:environment:production"
+add_subject() {
+  local name=$1 subject=$2
+  if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$subject'].name" -o tsv)" ]; then
+    az ad app federated-credential create --id "$APP_ID" --parameters "{\"name\":\"$name\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"$subject\",\"audiences\":[\"api://AzureADTokenExchange\"]}" -o none
+  fi
+}
+add_subject github-production "$SUBJECT"
+add_subject github-production-ids "$SUBJECT_IDS"
 
 RG_ID=$(az group show -n "$RG" --query id -o tsv)
 if [ -z "$(az role assignment list --assignee "$SP_ID" --scope "$RG_ID" --role Contributor --query '[0].id' -o tsv)" ]; then
@@ -34,4 +44,4 @@ gh api -X POST "repos/$REPO/environments/production/deployment-branch-policies" 
 gh variable set AZURE_CLIENT_ID --repo "$REPO" --body "$APP_ID"
 gh variable set AZURE_TENANT_ID --repo "$REPO" --body "$TENANT"
 gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPO" --body "$SUB"
-echo "deploy identity $NAME ($APP_ID): Contributor on $RG, trusted for $SUBJECT"
+echo "deploy identity $NAME ($APP_ID): Contributor on $RG, trusted for $SUBJECT and $SUBJECT_IDS"
