@@ -4,6 +4,8 @@
 export interface Cache {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSec: number): Promise<void>;
+  /** Set only if absent (cache fills must never overwrite a newer write-through). */
+  setNx(key: string, value: string, ttlSec: number): Promise<void>;
   del(key: string): Promise<void>;
   /** Increment a counter that expires after ttlSec; returns the new value. */
   incr(key: string, ttlSec: number): Promise<number>;
@@ -42,6 +44,7 @@ export class MemoryCache implements Cache {
   private zsets = new Map<string, Map<string, number>>();
   async get(k: string) { return this.kv.get(k) ?? null; }
   async set(k: string, v: string, ttl: number) { this.kv.set(k, v, ttl * 1000); }
+  async setNx(k: string, v: string, ttl: number) { if (this.kv.get(k) === undefined) this.kv.set(k, v, ttl * 1000); }
   async del(k: string) { this.kv.delete(k); }
   async incr(k: string, ttl: number) {
     const now = Date.now();
@@ -63,7 +66,8 @@ export class RedisCache implements Cache {
 
   static async connect(url: string, prefix = '{pw}:'): Promise<RedisCache> {
     const { createClient } = await import('redis');
-    const client = createClient({ url, socket: { reconnectStrategy: (n: number) => Math.min(n * 200, 5000), connectTimeout: 5000 } });
+    // Fail fast while disconnected (callers fall back to the store) instead of queueing and hanging requests.
+    const client = createClient({ url, disableOfflineQueue: true, socket: { reconnectStrategy: (n: number) => Math.min(n * 200, 5000), connectTimeout: 5000 } });
     client.on('error', (e: Error) => console.error('[redis]', e.message));
     await client.connect();
     return new RedisCache(client, prefix);
@@ -72,6 +76,7 @@ export class RedisCache implements Cache {
   private k(key: string) { return this.prefix + key; }
   async get(key: string) { return (await this.client.get(this.k(key))) as string | null; }
   async set(key: string, v: string, ttl: number) { await this.client.set(this.k(key), v, { EX: ttl }); }
+  async setNx(key: string, v: string, ttl: number) { await this.client.set(this.k(key), v, { EX: ttl, NX: true }); }
   async del(key: string) { await this.client.del(this.k(key)); }
   async incr(key: string, ttl: number) {
     const k = this.k(key);
@@ -93,13 +98,18 @@ export class RedisCache implements Cache {
 export class Layered {
   private l1 = new Lru<string>(500);
   constructor(readonly l2: Cache, private l1Ms = 5000, private l2Sec = 300) {}
-  async read(key: string, load: () => Promise<string | null>): Promise<{ value: string | null; from: 'l1' | 'l2' | 'store' }> {
-    const a = this.l1.get(key);
+  /** fresh skips L1 (the owner resuming must see the newest version; L2 is kept current by write-through). */
+  async read(key: string, load: () => Promise<string | null>, fresh = false): Promise<{ value: string | null; from: 'l1' | 'l2' | 'store' }> {
+    const a = fresh ? undefined : this.l1.get(key);
     if (a !== undefined) return { value: a, from: 'l1' };
     const b = await this.l2.get(key).catch(() => null);
     if (b !== null) { this.l1.set(key, b, this.l1Ms); return { value: b, from: 'l2' }; }
     const c = await load();
-    if (c !== null) await this.write(key, c);
+    if (c !== null) {
+      // NX: if a PUT on another replica wrote a newer value meanwhile, keep that one.
+      this.l1.set(key, c, this.l1Ms);
+      await this.l2.setNx(key, c, this.l2Sec).catch(() => {});
+    }
     return { value: c, from: 'store' };
   }
   async write(key: string, value: string) {
