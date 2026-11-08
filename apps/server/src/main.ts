@@ -1,33 +1,26 @@
-import { createServer } from 'node:http';
 import { resolve } from 'node:path';
-import { serveStatic } from './static.ts';
+import { createApp } from './app.ts';
+import { Layered, MemoryCache, RedisCache, type Cache } from './cache.ts';
+import { CosmosStore, FileStore, type Store } from './store.ts';
 
 const PORT = Number(process.env.PORT ?? 8790);
 const WEB_DIST = resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname);
 const VERSION = process.env.APP_VERSION ?? 'dev';
 
-const statics = serveStatic(WEB_DIST);
+async function makeStore(): Promise<Store> {
+  if (process.env.STORE === 'cosmos' && process.env.COSMOS_ENDPOINT) return CosmosStore.connect(process.env.COSMOS_ENDPOINT);
+  return new FileStore(resolve(process.env.SAVES_DIR ?? new URL('../../../saves', import.meta.url).pathname));
+}
 
-const server = createServer(async (req, res) => {
-  try {
-    const url = req.url ?? '/';
-    const path = url.split('?')[0];
-    if (path === '/api/health') {
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ ok: true, version: VERSION }));
-      return;
-    }
-    if (path.startsWith('/api/')) {
-      res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'not found' }));
-      return;
-    }
-    if (await statics(req, res)) return;
-    res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
-  } catch (e) {
-    console.error(e);
-    if (!res.headersSent) res.writeHead(500).end('server error');
+async function makeCache(): Promise<Cache> {
+  if (process.env.REDIS_URL) {
+    try { return await RedisCache.connect(process.env.REDIS_URL); }
+    catch (e) { console.error('[redis] unavailable, using the in-process cache:', (e as Error).message); }
   }
-});
+  return new MemoryCache();
+}
 
-server.listen(PORT, () => console.log(`parkwright server ${VERSION} on :${PORT}, serving ${WEB_DIST}`));
+const [store, cache] = await Promise.all([makeStore(), makeCache()]);
+const server = createApp({ store, cache, docs: new Layered(cache) }, { webDist: WEB_DIST, version: VERSION });
+server.listen(PORT, () => console.log(`parkwright server ${VERSION} on :${PORT} — store ${store.kind}, cache ${cache.kind}, serving ${WEB_DIST}`));
 for (const sig of ['SIGTERM', 'SIGINT'] as const) process.on(sig, () => server.close(() => process.exit(0)));
