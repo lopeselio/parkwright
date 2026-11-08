@@ -2,7 +2,7 @@
 //   browser  ──ws /ws/bridge──▶  server  ◀──MCP over HTTP /mcp/<code>── Claude Code
 // The browser asks for a pairing code; the code is the only key (128 bits, valid while the tab is open).
 // Every command runs in the browser through the same validated actions as a player's.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -10,9 +10,12 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
 import type { Cache } from './cache.ts';
 import type { BridgeReply, Relay } from './relay.ts';
+import { clientIp } from './parks.ts';
 
 const CODE_RE = /^[a-z2-7]{26}$/;
+/** The tab gets 15 s; whoever waits for the relay gets a little longer, so the tab's own timeout reply arrives. */
 const TIMEOUT_MS = 15_000;
+const WAIT_MS = TIMEOUT_MS + 2_000;
 const PER_MIN = 90;
 const newCode = () => {
   // RFC 4648 base32, lowercase: 26 chars ≈ 128 bits.
@@ -21,39 +24,97 @@ const newCode = () => {
   return Array.from(bytes, (b) => alphabet[b & 31]).join('');
 };
 
-export function attachBridge(server: Server, relay: Relay) {
+/** Sockets per client IP and per replica (each holds a subscription and a keep-alive). */
+const MAX_PER_IP = 5;
+const MAX_SOCKETS = 500;
+const RESUME_TTL = 24 * 3600;
+const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/** Same-site only: the page that pairs must be served by this host (blocks drive-by socket floods). */
+function sameOrigin(req: IncomingMessage) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // non-browser clients (tests, tools) send no Origin
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+}
+
+export function attachBridge(server: Server, relay: Relay, cache: Cache) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const perIp = new Map<string, number>();
+  let total = 0;
   server.on('upgrade', (req, socket, head) => {
-    if ((req.url ?? '').split('?')[0] !== '/ws/bridge') { socket.destroy(); return; }
-    wss.handleUpgrade(req, socket, head, (ws) => void pair(ws, relay));
+    if ((req.url ?? '').split('?')[0] !== '/ws/bridge' || !sameOrigin(req)) { socket.destroy(); return; }
+    const ip = clientIp(req);
+    if (total >= MAX_SOCKETS || (perIp.get(ip) ?? 0) >= MAX_PER_IP) { socket.destroy(); return; }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      // Error handler first, synchronously: an oversized or invalid frame must never crash the process.
+      ws.on('error', () => ws.terminate());
+      total++;
+      perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
+      ws.once('close', () => { total--; const n = (perIp.get(ip) ?? 1) - 1; if (n <= 0) perIp.delete(ip); else perIp.set(ip, n); });
+      pair(ws, relay, cache).catch((e) => { console.error('[bridge]', (e as Error).message); ws.terminate(); });
+    });
   });
 }
 
-async function pair(ws: WebSocket, relay: Relay) {
-  const code = newCode();
+/** Wait for the browser's hello: a new pairing, or resuming an earlier code with its secret. */
+function hello(ws: WebSocket): Promise<{ code?: string; secret?: string }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({}), 3000);
+    ws.once('message', (data) => {
+      clearTimeout(timer);
+      try { const m = JSON.parse(String(data)); resolve(m?.type === 'hello' ? { code: m.code, secret: m.secret } : {}); }
+      catch { resolve({}); }
+    });
+  });
+}
+
+async function pair(ws: WebSocket, relay: Relay, cache: Cache) {
+  let closed = false;
+  let unserve: (() => Promise<void>) | null = null;
   const pending = new Map<string, (r: BridgeReply) => void>();
+  const keepAlive = setInterval(() => { if (code) void relay.touch(code).catch(() => {}); if (ws.readyState === ws.OPEN) ws.ping(); }, 20_000);
+  ws.on('close', () => {
+    closed = true;
+    clearInterval(keepAlive);
+    void unserve?.();
+    for (const r of pending.values()) r({ ok: false, text: 'the game tab closed' });
+  });
+
+  // Resume: same code after a reconnect (deploy, network blip), if the secret matches and nobody holds it.
+  const h = await hello(ws);
+  let code = '';
+  let secret = '';
+  if (h.code && h.secret && CODE_RE.test(h.code) && typeof h.secret === 'string') {
+    const stored = await cache.get(`bridge:secret:${h.code}`).catch(() => null);
+    if (stored && stored === sha(h.secret) && !(await relay.alive(h.code))) { code = h.code; secret = h.secret; }
+  }
+  if (!code) { code = newCode(); secret = randomBytes(24).toString('base64url'); }
+  await cache.set(`bridge:secret:${code}`, sha(secret), RESUME_TTL).catch(() => {});
+  if (closed) return;
+
   let n = 0;
-  const unserve = await relay.serve(code, (command) => new Promise<BridgeReply>((resolve) => {
+  unserve = await relay.serve(code, (command) => new Promise<BridgeReply>((resolve) => {
+    if (closed) { resolve({ ok: false, text: 'the game tab closed' }); return; }
     const id = String(++n);
     const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, text: 'the game tab did not answer' }); }, TIMEOUT_MS);
-    pending.set(id, (r) => { clearTimeout(timer); resolve(r); });
+    pending.set(id, (r) => { clearTimeout(timer); pending.delete(id); resolve(r); });
     ws.send(JSON.stringify({ type: 'command', id, command }));
   }));
-  ws.send(JSON.stringify({ type: 'paired', code }));
-  const keepAlive = setInterval(() => { void relay.touch(code).catch(() => {}); if (ws.readyState === ws.OPEN) ws.ping(); }, 20_000);
+  // The socket may have closed while we were subscribing.
+  if (closed) { await unserve(); return; }
+  ws.send(JSON.stringify({ type: 'paired', code, secret, resumed: code === h.code }));
   ws.on('message', (data) => {
     let m: any;
     try { m = JSON.parse(String(data)); } catch { return; }
     if (m?.type === 'result' && typeof m.id === 'string') pending.get(m.id)?.({ ok: m.ok === true, text: String(m.text ?? '').slice(0, 20_000) });
   });
-  ws.on('close', () => { clearInterval(keepAlive); void unserve(); for (const r of pending.values()) r({ ok: false, text: 'the game tab closed' }); });
 }
 
 function mcpFor(code: string, relay: Relay) {
   const mcp = new McpServer({ name: 'parkwright', version: '0.1.0' });
   const run = async (command: string) => {
-    const r = await relay.request(code, command, TIMEOUT_MS);
-    if (!r) return { content: [{ type: 'text' as const, text: 'The park is not connected: open the game and run `pw bridge` again for a fresh link.' }], isError: true };
+    const r = await relay.request(code, command, WAIT_MS);
+    if (!r) return { content: [{ type: 'text' as const, text: 'The park is not connected: open the game tab (the link resumes automatically) or run `bridge` for a new one.' }], isError: true };
     return { content: [{ type: 'text' as const, text: r.text }], isError: !r.ok };
   };
   mcp.registerTool('pw', {
@@ -66,13 +127,11 @@ function mcpFor(code: string, relay: Relay) {
     description: 'Status, rides, finances and what visitors are thinking — a good first call.',
     inputSchema: {},
   }, async () => {
-    const parts: string[] = [];
-    for (const c of ['park', 'ride list', 'finance', 'visitors thoughts']) {
-      const r = await relay.request(code, c, TIMEOUT_MS);
-      if (!r) return { content: [{ type: 'text' as const, text: 'The park is not connected.' }], isError: true };
-      parts.push(`> pw ${c}\n${r.text}`);
-    }
-    return { content: [{ type: 'text' as const, text: parts.join('\n\n') }] };
+    // In parallel, so the whole call stays well inside the HTTP request timeout.
+    const cmds = ['park', 'ride list', 'finance', 'visitors thoughts'];
+    const rs = await Promise.all(cmds.map((c) => relay.request(code, c, WAIT_MS)));
+    if (rs.some((r) => !r)) return { content: [{ type: 'text' as const, text: 'The park is not connected.' }], isError: true };
+    return { content: [{ type: 'text' as const, text: cmds.map((c, i) => `> pw ${c}\n${rs[i]!.text}`).join('\n\n') }] };
   });
   return mcp;
 }
@@ -101,7 +160,7 @@ export async function handleBridge(req: IncomingMessage, res: ServerResponse, pa
     try { body = await readBody(req); } catch { res.writeHead(400).end(); return true; }
     const command = typeof body?.command === 'string' ? body.command.slice(0, 200) : '';
     if (!command) { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'command required' })); return true; }
-    const r = await relay.request(code, command, TIMEOUT_MS);
+    const r = await relay.request(code, command, WAIT_MS);
     res.writeHead(r ? 200 : 404, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(r ?? { ok: false, text: 'no park is paired with that code (is the tab still open?)' }));
     return true;

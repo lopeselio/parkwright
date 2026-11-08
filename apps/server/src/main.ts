@@ -59,7 +59,7 @@ const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_
 // Bridge relay: Redis pub/sub across replicas when hosted, in-process locally.
 const relay: Relay = process.env.REDIS_URL ? await RedisRelay.connect(process.env.REDIS_URL).catch((e) => { console.error('[relay] falling back to local:', e.message); return new LocalRelay(); }) : new LocalRelay();
 const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay }, { webDist: WEB_DIST, version: VERSION });
-attachBridge(server, relay);
+attachBridge(server, relay, cache);
 // Don't let slow clients hold connections open (defaults are 300 s / 60 s).
 server.requestTimeout = 30_000;
 server.headersTimeout = 10_000;
