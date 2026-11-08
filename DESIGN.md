@@ -171,7 +171,10 @@ The terminal can also make mods. You describe what you want, an AI writes the mo
   - `pw mod apply` loads the draft; `pw mod discard` drops it.
 - **AI backends:**
   - **NEAR AI** (default, and the only one hosted): a TEE-attested model on NEAR AI Cloud. The request and your park's data stay private, and each reply is signed (see the AI manager above).
-  - **Claude terminal** (local only): `pnpm dev` with `PW_CLAUDE_TERMINAL=1` lets the server spawn the real `claude` CLI in a PTY, streamed to the in-game xterm panel over a WebSocket.
+  - **Claude terminal** (local only, as built): the server, started with `PW_CLAUDE_TERMINAL=1`, spawns the real `claude` CLI and streams it to the in-game xterm over `/ws/claude`. The terminal comes from `apps/server/pty-helper.py`, a Python pty, because BSD `script` needs a TTY on stdin.
+    - The socket must come from loopback, with a localhost Host (DNS rebinding) and a same-origin page.
+    - Claude runs with `--strict-mcp-config` against this tab's bridge (`pw`, `park_overview`, `mod_apply`), with `--allowedTools` limited to those plus file tools and `--disallowedTools Bash WebFetch WebSearch`.
+    - One session per server. It is never enabled in the hosted image.
     - It runs in `mods/workspace/`, with the parkwright MCP server attached and `--allowedTools` limited to `mcp__parkwright__*` plus Read/Write/Edit inside that folder.
     - No `--dangerously-skip-permissions`, and no shell.
     - It is never enabled on the hosted server.
