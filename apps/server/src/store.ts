@@ -14,6 +14,8 @@ export interface ParkDoc {
   visitors: number;
   day: number;
   scenario: string;
+  /** Built with mods (ranked on a separate board). */
+  modded?: boolean;
   /** The save file as the client produced it (snapshot + recent action log). */
   save: unknown;
   createdAt: number;
