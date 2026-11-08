@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './game.ts';
+import { Cloud } from './cloud.ts';
 import { World } from './render/world.ts';
 import { Tools } from './ui/tools.ts';
 import { Hud } from './ui/hud.ts';
@@ -20,7 +21,17 @@ const toggleTerminal = (open = !termHost.classList.contains('open')) => {
   if (open) setTimeout(() => terminal.focus(), 160);
   else canvas.focus();
 };
-new Hud(game, tools, () => toggleTerminal());
+const cloud = new Cloud(game);
+new Hud(game, tools, () => toggleTerminal(), cloud);
+
+// ?park=<id> opens a shared park (yours resumes; anyone else's becomes a copy you play).
+const shared = new URLSearchParams(location.search).get('park');
+if (shared) {
+  cloud.open(shared)
+    .then((how) => toast(how === 'own' ? 'Welcome back to your park' : `Visiting ${game.s.name} — this is your own copy to play`))
+    .catch((e: Error) => toast(e.message, 'err'))
+    .finally(() => history.replaceState(null, '', location.pathname));
+}
 
 // Agents and the AI layer register extra terminal commands on this hook.
 (window as unknown as { parkwright: unknown }).parkwright = { game, world, terminal, tools };

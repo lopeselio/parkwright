@@ -1,6 +1,7 @@
 import { DAYS_PER_SEASON, DAYS_PER_WEEK, PIECES, SCENERY, endPose, findRide, isClosed, queueCapacity, valueForMoney, type Dir } from '@parkwright/sim';
 import type { Game } from '../game.ts';
 import type { Tools } from './tools.ts';
+import type { Cloud } from '../cloud.ts';
 import { $, cr, h, toast } from './dom.ts';
 
 const ICON: Record<string, string> = { select: '☝', path: '▦', queue: '⋯', ride: '🎠', stall: '🥨', scenery: '🌳', bin: '🗑', bulldoze: '✕' };
@@ -8,10 +9,11 @@ const ICON: Record<string, string> = { select: '☝', path: '▦', queue: '⋯',
 export class Hud {
   private selected: number | null = null;
   private drawer: 'rides' | 'stalls' | 'scenery' | null = null;
-  private panel: 'finance' | 'visitors' | 'staff' | null = null;
+  private panel: 'finance' | 'visitors' | 'staff' | 'parks' | null = null;
+  private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
   private last = '';
 
-  constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void) {
+  constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void, private cloud: Cloud) {
     tools.onSelect = (id) => { this.selected = id; this.panel = null; this.renderSide(); };
     tools.onChange = () => this.renderTools();
     // Never rebuild the side panel between mousedown and mouseup, or the click is lost.
@@ -42,7 +44,10 @@ export class Hud {
         refs.save,
         h('div', { class: 'speeds' }, ...speeds),
         h('div', { class: 'menu' },
-          ...(['finance', 'visitors', 'staff'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => { this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop(); } }, p[0].toUpperCase() + p.slice(1))),
+          ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => {
+            this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
+            if (this.panel === 'parks') void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
+          } }, p[0].toUpperCase() + p.slice(1))),
           h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
         ),
         s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
@@ -141,7 +146,7 @@ export class Hud {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
-    const key = `${this.selected}|${this.panel}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
+    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
     if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
@@ -212,6 +217,27 @@ export class Hud {
         h('h4', {}, 'What they are thinking'),
         ...[...m].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => h('div', { class: 'thought' }, h('b', {}, String(n)), ` ${k}`)),
         h('p', { class: 'muted' }, `${s.totalVisitors} visitors so far.`),
+      );
+      return;
+    }
+    if (this.panel === 'parks') {
+      side.classList.add('open');
+      const link = this.cloud.link;
+      side.replaceChildren(
+        h('header', {}, h('h2', {}, 'Parks'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
+        h('p', { class: 'muted' }, link ? `Your park is in the cloud and saves itself every day. ${this.cloud.status}` : 'Publish your park to get a link anyone can open. It keeps saving itself every day.'),
+        h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => {
+          try {
+            const url = await this.cloud.publish();
+            await navigator.clipboard?.writeText(url).catch(() => {});
+            toast('Link copied — anyone with it can visit a copy of your park', 'ok', url);
+          } catch (e) { toast((e as Error).message, 'err'); }
+          this.renderSide();
+        } }, link ? 'Copy share link' : 'Publish & share')),
+        h('h4', {}, 'Top parks'),
+        ...(this.board.length ? this.board.map((b, i) => h('div', { class: 'staff' },
+          h('span', {}, `${i + 1}. `, h('b', {}, b.name), ` · rating ${b.rating} · ${b.visitors} visitors · day ${b.day + 1}`),
+          h('a', { class: 'small', href: `/?park=${b.id}` }, 'Visit'))) : [h('p', { class: 'muted' }, 'No published parks yet.')]),
       );
       return;
     }
