@@ -89,7 +89,14 @@ export class ParkTerminal {
     this.prompt();
   }
 
+  /** Raw mode: every keystroke goes to `sink` (e.g. a Claude session) until detach(). */
+  private sink: ((d: string) => void) | null = null;
+  attach(sink: (d: string) => void) { this.sink = sink; this.busy = true; }
+  detach() { this.sink = null; this.busy = false; this.prompt(); }
+  get size() { return { cols: this.term.cols, rows: this.term.rows }; }
+
   private input(d: string) {
+    if (this.sink) { this.sink(d); return; }
     if (this.busy) return;
     if (d === '\r') { const l = this.line; this.line = ''; void this.submit(l); return; }
     if (d === '\x7f') { if (this.line) { this.line = this.line.slice(0, -1); this.term.write('\b \b'); } return; }

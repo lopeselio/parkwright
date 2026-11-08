@@ -3,6 +3,7 @@ import { Game } from './game.ts';
 import { Cloud } from './cloud.ts';
 import { AiTerminal } from './ai.ts';
 import { Bridge } from './bridge.ts';
+import { ClaudeTerminal } from './claude.ts';
 import { World } from './render/world.ts';
 import { Tools } from './ui/tools.ts';
 import { Hud } from './ui/hud.ts';
@@ -18,7 +19,8 @@ const termHost = $('#terminal');
 const terminal = new ParkTerminal(game, $('#term-body'));
 terminal.onFocus = (x, y) => world.focus(x, y);
 new AiTerminal(game, terminal);
-new Bridge(game, terminal, (x, y) => world.focus(x, y));
+const bridge = new Bridge(game, terminal, (x, y) => world.focus(x, y));
+new ClaudeTerminal(terminal, bridge);
 tools.onCommand = (cmd) => terminal.echo(cmd);
 const toggleTerminal = (open = !termHost.classList.contains('open')) => {
   termHost.classList.toggle('open', open);
