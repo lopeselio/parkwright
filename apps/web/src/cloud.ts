@@ -92,7 +92,7 @@ export class Cloud {
     if (why) throw new Error(`can't open that park: ${why}`);
     if (own) {
       this.game.visiting = false;
-      this.game.load(body.save as SaveFile);
+      this.game.load(body.save as SaveFile, true);
       this.link!.version = body.version;
       write(this.link);
       this.conflict = false;
