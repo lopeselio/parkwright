@@ -150,7 +150,11 @@ Errors are guided: a refusal says what would be valid ("no path at 12,8; nearest
 - **`pw`** is a resource/verb CLI shared by every interface: `pw park`, `pw map`, `pw ride list|build|price|open|close|inspect`, `pw coaster start|add|undo|test`, `pw shop`, `pw path`, `pw staff`, `pw finance`, `pw visitors thoughts`, `pw marketing`, `pw loan`. It is text-first, uses display names rather than ids, has guided errors, and offers `-o json`.
 - **In game:** an xterm.js panel (toggle with \`), with the same parser. `pw ask "<goal>"` hands the turn to the AI manager.
 - **AI manager:** a NEAR AI Cloud model in a TEE (attested), driven by a tool loop whose only tool is `pw`. It has a budget per day, set by the player. Every prompt and reply is signed, and you can check its proof bundle with `pnpm verify:manager`.
-- **Claude Code over MCP:** `packages/mcp` exposes `pw` as an MCP tool against a running server, so `claude mcp add parkwright …` can play your park.
+- **Claude Code over MCP:** the server exposes MCP over Streamable HTTP at `/mcp/<code>` (stateless; tools `pw` and `park_overview`).
+  - `bridge` in the game opens a WebSocket (`/ws/bridge`). The server pairs it with a 26-char base32 code (~128 bits, the only credential), valid while the tab is open.
+  - Commands go MCP → relay → the tab, run there with `runCommand`, and the result comes back.
+  - The relay is in-process locally. Hosted, it uses Redis pub/sub (commands) plus a reply list read with `BRPOP`, because the MCP request and the socket may land on different replicas.
+  - Rate limit: 90 commands per minute per code.
 
 **As built (2026-11):**
 - `POST /api/ai/manager` relays a turn to NEAR AI (JSON mode): `{say, commands ≤5, done}` plus the proof bundle. The browser runs the commands against its own park and feeds the results back, up to 8 turns, stopping at the player's `--budget`.

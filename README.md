@@ -32,3 +32,10 @@ Both run on a TEE-attested model on NEAR AI Cloud. The model can only propose `p
 - Do: `mod ai "a haunted drop tower and a hot cocoa cart"`, then `mod apply`. See: the new ride and stall in the Rides and Stalls drawers and in `pw ride types`. Ids are namespaced and every number is clamped, so a mod can't break the game or replace base content. Published parks carry their mods, so visitors see them too.
 - Do: `ai proofs`. See: a JSON download with the exact signed request/response bytes and signatures, which anyone can re-check.
 - Do: `pw ride place teacups`. See: the game finds room near the paths, builds, connects the entrance and opens the ride (the manager uses this too).
+
+## Let Claude Code play your park (MCP)
+
+- Do: in the game's terminal, type `bridge`. See: a one-time link like `https://…/mcp/<code>` and the command to add it.
+- Do: in a shell, `claude mcp add --transport http parkwright <that link>`, then ask Claude "use the parkwright tools to build me a food court". See: each command Claude runs appears in your terminal as `claude › pw …`, and the camera follows it.
+- Tools: `pw` (any terminal command) and `park_overview` (status, rides, finance, thoughts). Commands run in your tab through the same validated actions as yours. The link is the only key: 128 bits, valid only while the tab is open. `bridge off` revokes it.
+- Hosted, the server relays between replicas through Redis pub/sub, so it works whichever replica Claude's requests land on.
