@@ -3,6 +3,7 @@ import { SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/si
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
 import { loadModel } from './assets.ts';
+import { buildCoaster } from './coaster.ts';
 
 /** Tile (x,y) centre in world space. 1 tile = 1 unit. */
 export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0, y + 0.5);
@@ -208,11 +209,24 @@ export class World {
     const seen = new Set<number>();
     for (const r of st.rides) {
       seen.add(r.id);
-      const key = `${r.type},${r.x},${r.y},${r.rot},${r.track?.length ?? 0}`;
+      const key = `${r.type},${r.x},${r.y},${r.rot},${r.track?.length ?? 0},${r.ratings ? 1 : 0}`;
       const have = this.rides.get(r.id);
       if (have && have.key === key) { have.ride = r; continue; }
       if (have) { this.scene.remove(have.group); disposeTree(have.group); }
       const t = this.c.rideTypes[r.type];
+      if (r.track) {
+        // Coasters are generated from the sim's own track path.
+        const cv = buildCoaster(r);
+        const root = new THREE.Group();
+        root.userData.rideId = r.id;
+        root.add(cv.group);
+        const entr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), mat('#c76a4a'));
+        entr.position.set(r.ex + 0.5, 0.03, r.ey + 0.5);
+        root.add(entr);
+        this.scene.add(root);
+        this.rides.set(r.id, { ride: r, group: root, animate: cv.animate, key });
+        continue;
+      }
       const { group, animate } = buildModel(t.model, t.color, r.w, r.h);
       const root = new THREE.Group();
       const holder = new THREE.Group();
@@ -343,7 +357,8 @@ export class World {
     this.syncPeople(st, alpha);
     if ((st.tick & 31) === 0) this.syncLitter(st);
     for (const v of this.rides.values()) {
-      const running = v.ride.status === 'open' && (v.ride.cycle > 0 || this.c.rideTypes[v.ride.type].kind !== 'flat');
+      const kind = this.c.rideTypes[v.ride.type].kind;
+      const running = v.ride.status === 'open' && (kind === 'flat' || kind === 'track' ? v.ride.cycle > 0 : true);
       v.animate(time, running);
       // A broken ride shudders.
       v.group.rotation.z = v.ride.status === 'broken' ? Math.sin(time * 20) * 0.01 : 0;
