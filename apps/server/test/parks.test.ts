@@ -6,6 +6,7 @@ import { baseContent } from '@parkwright/content';
 import { Park } from '@parkwright/sim';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
+import { clientIp } from '../src/parks.ts';
 import { Layered, Lru, MemoryCache } from '../src/cache.ts';
 import { FileStore } from '../src/store.ts';
 
@@ -94,5 +95,44 @@ describe('cache', () => {
     expect((await docs.read('k', load)).from).toBe('store');
     expect((await docs.read('k', load)).from).toBe('l1');
     expect(loads).toBe(1);
+  });
+});
+
+describe('review regressions', () => {
+  it('rejects prototype names and null shapes with 422, not 500', async () => {
+    const good = saveOf();
+    for (const bad of [
+      { ...good, snapshot: { ...good.snapshot, scenario: 'constructor' } },
+      { ...good, snapshot: { ...good.snapshot, rides: [{ type: '__proto__' }] } },
+      { ...good, snapshot: null },
+      { ...good, snapshot: { ...good.snapshot, rides: [null] } },
+    ]) expect((await call('POST', '/api/parks', { save: bad })).status).toBe(422);
+  });
+
+  it('ranks by a rating it computes itself, not the one the client claims', async () => {
+    const fake = saveOf();
+    fake.snapshot.rating = 999;
+    const { id } = (await (await call('POST', '/api/parks', { save: fake })).json()) as any;
+    const doc = (await (await call('GET', `/api/parks/${id}`)).json()) as any;
+    expect(doc.rating).toBeLessThan(999);
+    expect(doc.rating).toBeGreaterThanOrEqual(0);
+  });
+
+  it('checks the key before reading the body', async () => {
+    const { id } = (await (await call('POST', '/api/parks', { save: saveOf() })).json()) as any;
+    const r = await fetch(`${base}/api/parks/${id}`, { method: 'PUT', headers: { 'x-park-key': 'wrong' }, body: 'x'.repeat(10) });
+    expect(r.status).toBe(403);
+  });
+
+  it('uses the rightmost x-forwarded-for entry (the one our ingress adds)', () => {
+    const req = { headers: { 'x-forwarded-for': '1.2.3.4, 9.9.9.9' }, socket: {} } as any;
+    expect(clientIp(req)).toBe('9.9.9.9');
+  });
+
+  it('cache fills never overwrite a newer write-through', async () => {
+    const l2 = new MemoryCache();
+    const docs = new Layered(l2, 1000, 60);
+    await docs.read('k', async () => { await l2.set('k', 'v6', 60); return 'v5'; }, true);
+    expect(await l2.get('k')).toBe('v6');
   });
 });
