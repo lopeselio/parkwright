@@ -5,14 +5,24 @@ import { baseContent } from '@parkwright/content';
 import { computeRating, parkValue, type ParkState } from '@parkwright/sim';
 import type { Cache, Layered } from './cache.ts';
 import { ConflictError, validId, type ParkDoc, type Store } from './store.ts';
+import type { Settler } from './settle.ts';
 
 export const MAX_BODY = 1_800_000; // under Cosmos' 2 MB item limit
 const WRITES_PER_MIN = 30;
 /** Across all clients, per replica window — a backstop if per-IP limiting is ever fooled. */
 const CREATES_PER_MIN = 300;
 const BOARD = 'board:rating';
+const CHAIN_CONTRACT = process.env.PARK_CONTRACT_ID ?? 'park.parkwright.testnet';
 
-export interface Deps { store: Store; cache: Cache; docs: Layered }
+export interface Deps {
+  store: Store;
+  cache: Cache;
+  docs: Layered;
+  /** NEAR settlement (absent when the server has no chain keys). */
+  settler?: Settler;
+  /** Read a park's on-chain state (escrow, earnings, settlements). */
+  chainPark?: (parkId: string) => Promise<unknown>;
+}
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const newId = () => randomBytes(8).toString('hex');
@@ -100,6 +110,23 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     return true;
   }
 
+  const chainMatch = path.match(/^\/api\/parks\/([^/]+)\/chain$/);
+  if (chainMatch && req.method === 'GET') {
+    const id = chainMatch[1];
+    if (!validId(id)) { json(res, 400, { error: 'bad park id' }); return true; }
+    if (!deps.chainPark) { json(res, 200, { enabled: false }); return true; }
+    // On-chain state changes with each settlement: cache it briefly (20 s) to spare the RPC.
+    let body = await cache.get(`chain:${id}`).catch(() => null);
+    const from = body ? 'l2' : 'rpc';
+    if (!body) {
+      body = JSON.stringify({ enabled: true, contract: CHAIN_CONTRACT, park: await deps.chainPark!(id).catch(() => null) });
+      await cache.set(`chain:${id}`, body, 20).catch(() => {});
+    }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', 'x-cache': from });
+    res.end(body);
+    return true;
+  }
+
   const m = path.match(/^\/api\/parks(?:\/([^/]+))?$/);
   if (!m) return false;
   const id = m[1];
@@ -145,6 +172,7 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       if (!doc) { json(res, 503, { error: 'could not allocate a park id' }); return true; }
       await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
       await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
+      if (deps.settler) void deps.settler.register(doc.id, doc.name).then(() => deps.settler!.markDirty(doc!.id));
       json(res, 201, { id: doc.id, key, version: doc.version });
       return true;
     }
@@ -159,6 +187,7 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     }
     await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
     await cache.zadd(BOARD, boardScore(doc), doc.id).catch(() => {});
+    await deps.settler?.markDirty(doc.id);
     json(res, 200, { id: doc.id, version: doc.version });
     return true;
   }

@@ -6,6 +6,8 @@ export interface Cache {
   set(key: string, value: string, ttlSec: number): Promise<void>;
   /** Set only if absent (cache fills must never overwrite a newer write-through). */
   setNx(key: string, value: string, ttlSec: number): Promise<void>;
+  /** Take a lock for ttlSec; true if we got it (shared across replicas when Redis is used). */
+  lock(key: string, ttlSec: number): Promise<boolean>;
   del(key: string): Promise<void>;
   /** Increment a counter that expires after ttlSec; returns the new value. */
   incr(key: string, ttlSec: number): Promise<number>;
@@ -45,6 +47,7 @@ export class MemoryCache implements Cache {
   async get(k: string) { return this.kv.get(k) ?? null; }
   async set(k: string, v: string, ttl: number) { this.kv.set(k, v, ttl * 1000); }
   async setNx(k: string, v: string, ttl: number) { if (this.kv.get(k) === undefined) this.kv.set(k, v, ttl * 1000); }
+  async lock(k: string, ttl: number) { if (this.kv.get(k) !== undefined) return false; this.kv.set(k, '1', ttl * 1000); return true; }
   async del(k: string) { this.kv.delete(k); }
   async incr(k: string, ttl: number) {
     const now = Date.now();
@@ -77,6 +80,7 @@ export class RedisCache implements Cache {
   async get(key: string) { return (await this.client.get(this.k(key))) as string | null; }
   async set(key: string, v: string, ttl: number) { await this.client.set(this.k(key), v, { EX: ttl }); }
   async setNx(key: string, v: string, ttl: number) { await this.client.set(this.k(key), v, { EX: ttl, NX: true }); }
+  async lock(key: string, ttl: number) { return (await this.client.set(this.k(key), String(process.pid), { EX: ttl, NX: true })) === 'OK'; }
   async del(key: string) { await this.client.del(this.k(key)); }
   async incr(key: string, ttl: number) {
     const k = this.k(key);
