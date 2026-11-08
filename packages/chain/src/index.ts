@@ -66,10 +66,13 @@ function nearFor(account: string, s: Signer) {
   });
 }
 
-async function call(near: Near, signer: string, method: string, args: object, deposit?: `${bigint} yocto`) {
+/** Measured: settle_day burns ~3 Tgas. Prepaid gas counts against a key's allowance, so keep it modest. */
+const GAS = { settle: '10 Tgas', admin: '30 Tgas' } as const;
+
+async function call(near: Near, signer: string, method: string, args: object, gas: `${number} Tgas`, deposit?: `${bigint} yocto`) {
   const r = await near
     .transaction(signer)
-    .functionCall(CONTRACT, method, args, { gas: '50 Tgas', ...(deposit ? { attachedDeposit: deposit } : {}) })
+    .functionCall(CONTRACT, method, args, { gas, ...(deposit ? { attachedDeposit: deposit } : {}) })
     .send({ waitUntil: 'EXECUTED_OPTIMISTIC' });
   return r.transaction.hash as string;
 }
@@ -78,9 +81,9 @@ async function call(near: Near, signer: string, method: string, args: object, de
 export function adminClient(s: Signer = {}) {
   const near = nearFor(ADMIN, s);
   return {
-    registerPark: (parkId: string, name: string, owner?: string) => call(near, ADMIN, 'register_park', { park_id: parkId, name, owner: owner ?? null }),
-    setPatron: (patron: string, dayCap: number, active = true) => call(near, ADMIN, 'set_patron', { patron, day_cap: String(dayCap), active }),
-    fundPatrons: (patrons: string[], amount: number) => call(near, ADMIN, 'fund_patrons', { patrons, amount: String(amount) }),
+    registerPark: (parkId: string, name: string, owner?: string) => call(near, ADMIN, 'register_park', { park_id: parkId, name, owner: owner ?? null }, GAS.admin),
+    setPatron: (patron: string, dayCap: number, active = true) => call(near, ADMIN, 'set_patron', { patron, day_cap: String(dayCap), active }, GAS.admin),
+    fundPatrons: (patrons: string[], amount: number) => call(near, ADMIN, 'fund_patrons', { patrons, amount: String(amount) }, GAS.admin),
   };
 }
 
@@ -89,11 +92,11 @@ export function patronClient(account: string, s: Signer = {}) {
   const near = nearFor(account, s);
   return {
     settleDay: (parkId: string, day: number, lines: SettleLine[], stateHash: string) =>
-      call(near, account, 'settle_day', { park_id: parkId, day, lines, state_hash: stateHash }),
+      call(near, account, 'settle_day', { park_id: parkId, day, lines, state_hash: stateHash }, GAS.settle),
   };
 }
 
-export interface ParkOnChain { owner: string; name: string; balance: string; earned: string; settlements: number; created_ms: number }
+export interface ParkOnChain { owner: string; name: string; balance: string; earned: string; settlements: number; created_ms: number; recent_days: [number, string][] }
 export interface PatronOnChain { account: string; balance: string; day_cap: string; spent: string; active: boolean }
 
 export const getPark = (parkId: string) => view<ParkOnChain | null>('get_park', { park_id: parkId });
