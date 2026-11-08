@@ -11,7 +11,8 @@ const CAR_GAP = 0.32; // units between car centres along the track
 
 export interface CoasterView {
   group: THREE.Group;
-  animate: (t: number, running: boolean) => void;
+  /** Place the train from the sim: ticks into the ride cycle (+ alpha between ticks). */
+  animate: (ride: Ride, alpha: number) => void;
 }
 
 function toVec(p: { x: number; y: number; z: number }) {
@@ -51,7 +52,7 @@ export function buildCoaster(ride: Ride): CoasterView {
 
   // Ties (sleepers), coloured by the forces measured in the test run.
   const tieGeo = new THREE.BoxGeometry(GAUGE * 2.6, 0.03, 0.06);
-  const ties = new THREE.InstancedMesh(tieGeo, new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), pts.length);
+  const ties = new THREE.InstancedMesh(tieGeo, mat('#ffffff', { roughness: 0.8 }), pts.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
   pts.forEach((p, i) => {
     const v = vecs[i];
@@ -139,12 +140,13 @@ export function buildCoaster(ride: Ride): CoasterView {
     });
   };
   place(0);
-  let started = -1;
-  const animate = (t: number, running: boolean) => {
-    if (!run?.ok) return;
-    if (!running) { started = -1; place(0); return; }
-    if (started < 0) started = t;
-    const sec = (t - started) % (run.t![run.t!.length - 1] + 2);
+  // The sim loads a batch, then counts `cycle` down from cycleTicks: the train runs for the test-run
+  // duration, then sits in the station unloading. Deriving the position from the sim keeps the train
+  // in step at any game speed, and still while paused.
+  const animate = (r: Ride, alpha: number) => {
+    if (!run?.ok || !run.t) return;
+    if (r.status !== 'open' || r.cycle <= 0 || !r.cycleTicks) { place(0); return; }
+    const sec = Math.min((r.cycleTicks - r.cycle + alpha) / 20, run.t[run.t.length - 1]);
     place(sAt(sec));
   };
   return { group: g, animate };

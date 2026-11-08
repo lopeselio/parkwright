@@ -15,10 +15,16 @@ const MAX_STAFF = 200;
 
 /** Free the GPU buffers of a model we're throwing away (materials are shared and cached). */
 function disposeTree(o: THREE.Object3D) {
-  o.traverse((x) => { const m = x as THREE.Mesh; if (m.isMesh) m.geometry.dispose(); });
+  o.traverse((x) => {
+    const m = x as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.geometry.dispose();
+    // Instanced meshes also own GPU buffers for their matrices/colours.
+    if ((x as THREE.InstancedMesh).isInstancedMesh) (x as THREE.InstancedMesh).dispose();
+  });
 }
 
-interface RideView { ride: Ride; group: THREE.Group; animate: Animator; key: string }
+interface RideView { ride: Ride; group: THREE.Group; animate: Animator; key: string; coaster?: (ride: Ride, alpha: number) => void }
 
 export class World {
   readonly scene = new THREE.Scene();
@@ -209,7 +215,7 @@ export class World {
     const seen = new Set<number>();
     for (const r of st.rides) {
       seen.add(r.id);
-      const key = `${r.type},${r.x},${r.y},${r.rot},${r.track?.length ?? 0},${r.ratings ? 1 : 0}`;
+      const key = `${r.type},${r.x},${r.y},${r.rot},${r.track?.length ?? 0},${r.trackRev ?? 0}`;
       const have = this.rides.get(r.id);
       if (have && have.key === key) { have.ride = r; continue; }
       if (have) { this.scene.remove(have.group); disposeTree(have.group); }
@@ -224,7 +230,7 @@ export class World {
         entr.position.set(r.ex + 0.5, 0.03, r.ey + 0.5);
         root.add(entr);
         this.scene.add(root);
-        this.rides.set(r.id, { ride: r, group: root, animate: cv.animate, key });
+        this.rides.set(r.id, { ride: r, group: root, animate: () => {}, coaster: cv.animate, key });
         continue;
       }
       const { group, animate } = buildModel(t.model, t.color, r.w, r.h);
@@ -359,7 +365,8 @@ export class World {
     for (const v of this.rides.values()) {
       const kind = this.c.rideTypes[v.ride.type].kind;
       const running = v.ride.status === 'open' && (kind === 'flat' || kind === 'track' ? v.ride.cycle > 0 : true);
-      v.animate(time, running);
+      if (v.coaster) v.coaster(v.ride, alpha);
+      else v.animate(time, running);
       // A broken ride shudders.
       v.group.rotation.z = v.ride.status === 'broken' ? Math.sin(time * 20) * 0.01 : 0;
     }
