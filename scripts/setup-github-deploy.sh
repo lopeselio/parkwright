@@ -27,7 +27,9 @@ if [ -z "$(az role assignment list --assignee "$SP_ID" --scope "$RG_ID" --role C
   az role assignment create --assignee-object-id "$SP_ID" --assignee-principal-type ServicePrincipal --role Contributor --scope "$RG_ID" -o none
 fi
 
-gh api -X PUT "repos/$REPO/environments/production" -f "deployment_branch_policy[protected_branches]=false" -F "deployment_branch_policy[custom_branch_policies]=true" >/dev/null
+# Booleans must be JSON booleans, so send a JSON body (gh's -f would send "false" as a string).
+echo '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' \
+  | gh api -X PUT "repos/$REPO/environments/production" --input - >/dev/null
 gh api -X POST "repos/$REPO/environments/production/deployment-branch-policies" -f name=main -f type=branch >/dev/null 2>&1 || true
 gh variable set AZURE_CLIENT_ID --repo "$REPO" --body "$APP_ID"
 gh variable set AZURE_TENANT_ID --repo "$REPO" --body "$TENANT"
