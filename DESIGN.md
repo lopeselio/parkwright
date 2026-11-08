@@ -177,21 +177,26 @@ The terminal can also make mods. You describe what you want, an AI writes the mo
 Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with admin `parkwright.testnet`.
 
 - **Credits:** an NEP-141 token, symbol `CR`, 2 decimals. 1 credit = 100 units = 100 in-game cents. It implements `ft_transfer`, `ft_balance_of`, `ft_total_supply` and `ft_metadata`. Transfers only go to accounts that already hold credits, own a park, or are patrons; that keeps storage bounded without storage deposits.
-- **Parks:** `register_park(park_id, name, owner?)`. The server registers each cloud park on its first publish, owned by the admin until a player claims it with `transfer_park`. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
+- **Parks:** `register_park(park_id, name, owner?)` is admin-only, so nobody can front-run a park id or spam storage. The server registers each cloud park on its first publish, owned by the admin until a player claims it with `transfer_park`. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
 - **Patrons** (agent visitors): `p0`–`p7.parkwright.testnet`, one per visitor group in the sim.
   - Each patron's only key is a function-call key for `settle_day` on the contract. It has no full-access key, so it can't move NEAR or call anything else.
   - The admin sets each patron's `day_cap` (1,000 CR per park-day) and mints its budget (`fund_patrons`, 20,000 CR, topped up automatically below 5,000 CR).
 - **Settlement:** `settle_day(park_id, day, lines[{venue, amount}], state_hash)` is signed by the patron itself. The contract:
   - requires `day` > the last day this patron settled for this park, so a day can't be paid twice and retries are safe;
-  - requires the sum ≤ `day_cap` and ≤ the patron's balance;
-  - moves the credits into the park's escrow, adds them to per-venue totals, and emits a `parkwright/settle` event.
+  - requires the sum ≤ `day_cap` (at most 2,000 CR) and ≤ the patron's balance;
+  - requires the park's total for that day, across all patrons, ≤ 5,000 CR. A fixed ring of the last 8 park-days per park keeps this bounded;
+  - refuses days ahead of real time: `day ≤ (now − created) / 20 s + 2`;
+  - moves the credits into the park's escrow and emits a `parkwright/settle` event (the lines are in the event; nothing per-venue is stored).
+- **Minting:** `fund_patrons` mints at most 200,000 CR per 24 h. Even a leaked server key can only create a bounded amount per day, and only patrons can spend it, within caps, into admin-registered parks.
   - `state_hash` is a sha256 of that day's stats, so the claim can be audited.
 - **The game server's admin key** is a function-call key on `parkwright.testnet`, limited to `register_park`, `set_patron` and `fund_patrons`.
-- **Invariant:** credits in accounts plus park escrow always equal `ft_total_supply`. The contract tests check this, and the `audit` view exposes it.
+- **Invariant:** credits in accounts plus park escrow always equal `ft_total_supply`. The contract tests check this. `audit` reports supply, escrow and today's minting in O(1).
+- **Upgrades:** `migrate()` (private, `#[init(ignore_state)]`) converts the v1 state, and `cargo near deploy … with-init-call migrate` runs it.
 - **Worker:** `apps/server/src/settle.ts`. After each cloud save, the park is marked dirty. One replica at a time (holding a Redis lock) settles its finished days: one `settle_day` per visitor group per day.
   - If a day's total is over the cap, the agent pays at most the cap, scaled evenly across venues.
   - "Already settled" counts as success.
-- **Trust note:** the day's spend comes from the client's save, which the sim produced in the browser. The caps bound what any one park-day can draw from a patron. Full verification means replaying the action log from the start.
+- **Trust note:** the day's spend comes from the client's save, which the sim produced in the browser. The caps bound what any park-day can draw. The worker applies the contract's bounds before sending, so bad saves cost no gas. It only settles into parks still held by the admin; a claimed park needs replay verification first (future work).
+- **Keys:** settle_day burns ~3 Tgas (measured). The first patrons' keys have a lifetime allowance of 0.12 NEAR, roughly 400 settlements each. New patrons get keys with no allowance, limited by the account's own 0.3 NEAR. A function-call-only account can't be rekeyed, so the fix is new patron accounts plus `set_patron(old, active=false)`.
 - **Later:** contractor agents that bid to build coasters, paid from escrow; players claiming parks with NEAR Auth.
 
 ## 10. Architecture
