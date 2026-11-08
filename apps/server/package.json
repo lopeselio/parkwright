@@ -4,11 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/main.ts",
-    "start": "node src/main.ts",
+    "dev": "node --experimental-transform-types --watch src/main.ts",
+    "start": "node --experimental-transform-types src/main.ts",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "build": "tsc --noEmit -p ."
   },
-  "devDependencies": { "@types/node": "24.19.2" }
+  "devDependencies": {
+    "@types/node": "24.19.2"
+  },
+  "dependencies": {
+    "@azure/cosmos": "4.10.2",
+    "@azure/identity": "4.14.1",
+    "@parkwright/content": "workspace:*",
+    "@parkwright/sim": "workspace:*",
+    "redis": "6.3.1"
+  }
 }
