@@ -1,4 +1,5 @@
 // Durable park storage. Cosmos DB for NoSQL when hosted (managed identity, no keys); JSON files locally.
+import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -24,8 +25,10 @@ export interface ParkDoc {
 export interface Store {
   readonly kind: string;
   get(id: string): Promise<ParkDoc | null>;
-  /** Create or replace. With expectVersion, fails with 'conflict' if the stored version differs. */
-  put(doc: ParkDoc, expectVersion?: number): Promise<void>;
+  /** Create a new doc; fails with ConflictError if the id exists. */
+  create(doc: ParkDoc): Promise<void>;
+  /** Replace an existing doc, only if its stored version is still expectVersion. */
+  put(doc: ParkDoc, expectVersion: number): Promise<void>;
 }
 
 export class ConflictError extends Error {
@@ -45,15 +48,24 @@ export class FileStore implements Store {
   async get(id: string) {
     try { return JSON.parse(await readFile(this.path(id), 'utf8')) as ParkDoc; } catch { return null; }
   }
-  async put(doc: ParkDoc, expectVersion?: number) {
+  async create(doc: ParkDoc) {
     await mkdir(this.dir, { recursive: true });
-    if (expectVersion !== undefined) {
+    try { await writeFile(this.path(doc.id), JSON.stringify(doc), { flag: 'wx' }); }
+    catch (e: any) { if (e?.code === 'EEXIST') throw new ConflictError(); throw e; }
+  }
+  // Local dev only: a per-id promise chain makes check-then-write atomic within this process.
+  private locks = new Map<string, Promise<unknown>>();
+  async put(doc: ParkDoc, expectVersion: number) {
+    const prev = this.locks.get(doc.id) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(async () => {
       const cur = await this.get(doc.id);
-      if (cur && cur.version !== expectVersion) throw new ConflictError();
-    }
-    const tmp = this.path(doc.id) + '.tmp';
-    await writeFile(tmp, JSON.stringify(doc));
-    await rename(tmp, this.path(doc.id)); // atomic replace
+      if (!cur || cur.version !== expectVersion) throw new ConflictError();
+      const tmp = `${this.path(doc.id)}.${randomBytes(4).toString('hex')}.tmp`;
+      await writeFile(tmp, JSON.stringify(doc));
+      await rename(tmp, this.path(doc.id)); // atomic replace
+    });
+    this.locks.set(doc.id, next);
+    try { await next; } finally { if (this.locks.get(doc.id) === next) this.locks.delete(doc.id); }
   }
 }
 
@@ -71,19 +83,22 @@ export class CosmosStore implements Store {
   async get(id: string) {
     try {
       const { resource } = await this.container.item(id, id).read();
-      return (resource as ParkDoc | undefined) ?? null;
+      return resource ? stripSystem(resource) : null;
     } catch (e: any) {
       if (e?.code === 404) return null;
       throw e;
     }
   }
 
-  async put(doc: ParkDoc, expectVersion?: number) {
-    if (expectVersion === undefined) { await this.container.items.upsert(doc); return; }
-    // Optimistic concurrency on our own version field, using Cosmos' ETag of the stored item.
-    const cur = await this.container.item(doc.id, doc.id).read().catch((e: any) => (e?.code === 404 ? { resource: undefined } : Promise.reject(e)));
-    if (!cur.resource) { await this.container.items.create(doc); return; }
-    if ((cur.resource as ParkDoc).version !== expectVersion) throw new ConflictError();
+  async create(doc: ParkDoc) {
+    try { await this.container.items.create(doc); }
+    catch (e: any) { if (e?.code === 409) throw new ConflictError(); throw e; }
+  }
+
+  async put(doc: ParkDoc, expectVersion: number) {
+    // Optimistic concurrency on our version field, made atomic with If-Match on the item's ETag.
+    const cur = await this.container.item(doc.id, doc.id).read();
+    if (!cur.resource || (cur.resource as ParkDoc).version !== expectVersion) throw new ConflictError();
     try {
       await this.container.item(doc.id, doc.id).replace(doc, { accessCondition: { type: 'IfMatch', condition: cur.etag } });
     } catch (e: any) {
@@ -91,4 +106,11 @@ export class CosmosStore implements Store {
       throw e;
     }
   }
+}
+
+/** Drop Cosmos system properties (_rid, _self, _etag, _ts…) before a doc goes anywhere public. */
+function stripSystem(r: Record<string, unknown>): ParkDoc {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(r)) if (!k.startsWith('_')) out[k] = v;
+  return out as unknown as ParkDoc;
 }
