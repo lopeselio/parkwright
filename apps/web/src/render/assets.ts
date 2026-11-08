@@ -36,9 +36,21 @@ export async function loadModel(id: string): Promise<THREE.Group | null> {
     let last = 0;
     clone.userData.animate = (t: number, run: boolean) => { mixer.update(run ? t - last : 0); last = t; };
   } else {
-    // Convention: a node named "spin" rotates about Y while the ride runs.
+    // Conventions from assets/blender/models.py: "spin" turns about the vertical axis, "wheel" turns on its
+    // axle (x), "carriage" rides up a tower and drops. Anything else stays still.
     const spin = clone.getObjectByName('spin');
-    clone.userData.animate = (t: number, run: boolean) => { if (spin && run) spin.rotation.y = t * 0.9; };
+    const wheel = clone.getObjectByName('wheel');
+    const carriage = clone.getObjectByName('carriage');
+    const base = carriage?.position.y ?? 0;
+    clone.userData.animate = (t: number, run: boolean) => {
+      if (!run) { if (carriage) carriage.position.y = base; return; }
+      if (spin) spin.rotation.y = t * 0.9;
+      if (wheel) wheel.rotation.x = t * 0.25;
+      if (carriage) {
+        const ph = (t % 9) / 9;
+        carriage.position.y = base + (ph < 0.55 ? (ph / 0.55) * 4.2 : ph < 0.7 ? 4.2 : ph < 0.76 ? 4.2 - ((ph - 0.7) / 0.06) * 4.2 : 0);
+      }
+    };
   }
   return clone;
 }
