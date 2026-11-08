@@ -95,4 +95,49 @@ describe('coasters', () => {
     const r = build(p);
     expect(testRun(r.track!).stats).toEqual(testRun(structuredClone(r.track!)).stats);
   });
+
+  it('review: undo refuses on a running coaster and only refunds half once it has carried riders', () => {
+    const p = Park.create(c, 'sandbox', 1);
+    const r = build(p);
+    p.run('coaster.test', {});
+    p.run('ride.open', { ride: r.id });
+    expect(p.run('coaster.undo', { ride: r.id }).ok).toBe(false);
+    expect(p.run('coaster.undo', {}).ok).toBe(false); // no default to a finished coaster
+    p.run('ride.close', { ride: r.id });
+    r.customers = 5;
+    const last = r.track![r.track!.length - 1];
+    const cash = p.s.cash;
+    expect(p.run('coaster.undo', { ride: r.id }).ok).toBe(true);
+    expect(p.s.cash - cash).toBe(Math.floor(last.paid! / 2));
+    expect(r.stats).toBeUndefined();
+    expect(r.cycleTicks).toBeUndefined();
+  });
+
+  it('review: undo refunds what a piece actually cost, even when a mod discounted it', () => {
+    const p = Park.create(c, 'sandbox', 1);
+    p.hooks.push({ mod: 'half', query: (_x, type, _q, res) => (type === 'coaster.add' ? Math.floor(res.cost / 2) : undefined) });
+    p.run('coaster.start', { x: 10, y: 10, dir: 1 });
+    p.run('coaster.add', { piece: 'lift', count: 2 });
+    const cash = p.s.cash;
+    p.run('coaster.undo', {});
+    expect(p.s.cash - cash).toBe(6000);
+  });
+
+  it('review: the station joins the track without a G spike', () => {
+    const p = Park.create(c, 'sandbox', 1);
+    const r = build(p);
+    const run = testRun(r.track!);
+    const stationEnd = 3 * 8; // 3 station pieces × 8 samples
+    for (let i = stationEnd - 4; i < stationEnd + 4; i++) expect(Math.abs(run.vert![i] - 1)).toBeLessThan(0.45);
+  });
+
+  it('review: every track change bumps trackRev', () => {
+    const p = Park.create(c, 'sandbox', 1);
+    p.run('coaster.start', { x: 10, y: 10, dir: 1 });
+    const r = p.s.rides[0];
+    const a = r.trackRev ?? 0;
+    p.run('coaster.add', { piece: 'straight' });
+    p.run('coaster.undo', {});
+    expect(r.trackRev).toBe(a + 2);
+  });
 });
