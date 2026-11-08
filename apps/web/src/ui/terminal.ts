@@ -92,7 +92,8 @@ export class ParkTerminal {
   /** Raw mode: every keystroke goes to `sink` (e.g. a Claude session) until detach(). */
   private sink: ((d: string) => void) | null = null;
   attach(sink: (d: string) => void) { this.sink = sink; this.busy = true; }
-  detach() { this.sink = null; this.busy = false; this.prompt(); }
+  /** Leave raw mode; the command that attached prints the next prompt when it finishes. */
+  detach() { this.sink = null; }
   get size() { return { cols: this.term.cols, rows: this.term.rows }; }
 
   private input(d: string) {
