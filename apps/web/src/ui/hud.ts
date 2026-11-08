@@ -11,6 +11,7 @@ export class Hud {
   private drawer: 'rides' | 'stalls' | 'scenery' | null = null;
   private panel: 'finance' | 'visitors' | 'staff' | 'parks' | null = null;
   private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
+  private chain: Awaited<ReturnType<Cloud['chain']>> = null;
   private last = '';
 
   constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void, private cloud: Cloud) {
@@ -46,7 +47,10 @@ export class Hud {
         h('div', { class: 'menu' },
           ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => {
             this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
-            if (this.panel === 'parks') void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
+            if (this.panel === 'parks') {
+              void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
+              void this.cloud.chain().then((c) => { this.chain = c; this.renderSide(); });
+            }
           } }, p[0].toUpperCase() + p.slice(1))),
           h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
         ),
@@ -146,7 +150,7 @@ export class Hud {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
-    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
+    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|${this.chain?.park?.earned ?? ''}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
     if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
@@ -236,6 +240,16 @@ export class Hud {
           } catch (e) { toast((e as Error).message, 'err'); }
           this.renderSide();
         } }, link ? 'Copy share link' : 'Publish & share')),
+        this.chain?.enabled && this.chain.park ? h('div', { class: 'chain' },
+          h('h4', {}, 'On NEAR testnet'),
+          h('p', { class: 'muted' }, `Visitors arrive in 8 groups, each paid for by an agent with its own NEAR account and a daily spending cap. Every finished day, each agent settles what its visitors spent into your park.`),
+          h('dl', {},
+            h('dt', {}, 'Settled into the park'), h('dd', {}, cr(Number(this.chain.park.earned))),
+            h('dt', {}, 'Waiting to withdraw'), h('dd', {}, cr(Number(this.chain.park.balance))),
+            h('dt', {}, 'Settlements'), h('dd', {}, String(this.chain.park.settlements)),
+          ),
+          h('a', { class: 'small', href: `https://testnet.nearblocks.io/address/${this.chain.contract}`, target: '_blank', rel: 'noopener' }, 'See the contract on NearBlocks ↗'),
+        ) : link && this.chain?.enabled ? h('p', { class: 'muted' }, 'Registering your park on NEAR… finished days settle within a minute of each cloud save.') : '',
         h('h4', {}, 'Top parks'),
         ...(this.board.length ? this.board.map((b, i) => h('div', { class: 'staff' },
           h('span', {}, `${i + 1}. `, h('b', {}, b.name), ` · rating ${b.rating} · ${b.visitors} visitors · day ${b.day + 1}`),
