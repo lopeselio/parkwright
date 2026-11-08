@@ -1,5 +1,5 @@
 import type { Content } from '@parkwright/content';
-import { ACTIONS, checkParams, type ActionResult, type Hook } from './actions.ts';
+import { ACTIONS, checkParams, findRideType, type ActionResult, type Hook } from './actions.ts';
 import './coaster.ts'; // registers coaster.* actions
 import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues } from './economy.ts';
 import { idx, Routes, SCENERY } from './map.ts';
@@ -81,7 +81,21 @@ export class Park {
   }
 
   /** Validate without changing anything. */
-  query(type: string, params: Record<string, unknown>): ActionResult {
+  /**
+   * Canonical params: ride types typed by name ("Carousel", "swing") become their ids before hooks run
+   * and before the action is logged, so mod rules can't be dodged and replays don't depend on which
+   * mods happen to be loaded.
+   */
+  normalize(type: string, params: Record<string, unknown>): Record<string, unknown> {
+    if (type === 'ride.build' && params && params.type !== undefined) {
+      const id = findRideType(this.c, params.type);
+      if (id && id !== params.type) return { ...params, type: id };
+    }
+    return params;
+  }
+
+  query(type: string, rawParams: Record<string, unknown>): ActionResult {
+    const params = this.normalize(type, rawParams);
     const a = ACTIONS[type];
     if (!a) return { ok: false, error: `unknown action "${type}"`, hint: `actions: ${Object.keys(ACTIONS).join(', ')}` };
     const bad = checkParams(this.s, params);
@@ -102,7 +116,8 @@ export class Park {
   }
 
   /** Query, then execute and book the cost. Every change to the park goes through here. */
-  run(type: string, params: Record<string, unknown>, actor = 'player'): ActionResult {
+  run(type: string, rawParams: Record<string, unknown>, actor = 'player'): ActionResult {
+    const params = this.normalize(type, rawParams);
     const q = this.query(type, params);
     const record: ActionRecord = { tick: this.s.tick, type, params, actor };
     if (!q.ok) { this.emit({ kind: 'action', record, result: q }); return q; }
