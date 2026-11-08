@@ -1,6 +1,7 @@
 // System prompts. The model only ever proposes `pw` commands or a data-only mod pack;
 // the game validates and runs (or refuses) them like any player input.
-import type { Message } from './nearai.ts';
+import type { Message } from './parse.ts';
+export { parseJsonReply } from './parse.ts';
 
 export interface ManagerTurn {
   /** One or two sentences to the player: what it noticed and what it's doing. */
@@ -30,7 +31,8 @@ Reply with ONE JSON object and nothing else:
 {"say": "<1-2 short sentences to the player>", "commands": ["<pw command>", ...], "done": <true|false>}
 - At most 5 commands per turn. Use exact coordinates from the map. Read results before building more.
 - If a command failed, read the hint and correct it next turn. Do not repeat a failing command unchanged.
-- Set "done": true when the player's goal is reached or you can't usefully do more.`;
+- Check "ride list": a ride marked NOT REACHABLE is not connected to the gate yet — keep laying path until it isn't.
+- Set "done": true only when the player's goal is reached (every new ride reachable) or you can't usefully do more.`;
 }
 
 export function managerMessages(help: string, goal: string, state: string, transcript: Message[]): Message[] {
@@ -83,4 +85,15 @@ export function modMessages(catalog: string, request: string): Message[] {
     { role: 'system', content: modSystem(catalog) },
     { role: 'user', content: `Make a mod: ${request}` },
   ];
+}
+
+/** Keep only what the manager may return: a short message, ≤5 short single-line commands, a done flag. */
+export function cleanTurn(raw: any): ManagerTurn {
+  const commands = (Array.isArray(raw?.commands) ? raw.commands : [])
+    .filter((c: unknown): c is string => typeof c === 'string')
+    .map((c: string) => c.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim().slice(0, 120))
+    .filter((c: string) => c.length > 0)
+    .slice(0, 5);
+  const say = typeof raw?.say === 'string' ? raw.say.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').slice(0, 300) : '';
+  return { say: say || '…', commands, done: raw?.done === true || commands.length === 0 };
 }
