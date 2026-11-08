@@ -2,6 +2,7 @@
 // pw <noun> <verb> [args…] [--flag value] [-o json]
 import { ACTIONS, findRide, type ActionResult, type Focus } from './actions.ts';
 import { parkValue, valueForMoney } from './economy.ts';
+import { LEVEL_M, PIECES } from './coaster.ts';
 import { idx, queueCapacity, SCENERY } from './map.ts';
 import type { Park } from './park.ts';
 import { DAYS_PER_SEASON, DAYS_PER_WEEK, Tile, type LedgerCategory } from './types.ts';
@@ -160,7 +161,8 @@ export const COMMANDS: Record<string, Cmd> = {
       const lines = [
         `${r.name} (#${r.id}, ${park.c.rideTypes[r.type].name}) at ${r.x},${r.y}, entrance ${r.ex},${r.ey} — ${r.status}`,
         `Price ${cr(r.price)}; visitors value it at ~${cr(r.value)}${park.s.fee > 0 ? ' (half that, since they paid to get in)' : ''}.`,
-        r.ratings ? `Excitement ${rating(r.ratings.e)}, intensity ${rating(r.ratings.i)}, nausea ${rating(r.ratings.n)}.` : 'Not rated.',
+        r.ratings ? `Excitement ${rating(r.ratings.e)}, intensity ${rating(r.ratings.i)}, nausea ${rating(r.ratings.n)}.` : r.track ? 'Not rated yet — close the circuit and run pw coaster test.' : 'Not rated.',
+        ...(r.stats ? [`Track: ${r.stats.length} m, ${r.stats.duration} s, top speed ${r.stats.maxSpeed} m/s, ${r.stats.drops} drop(s) up to ${r.stats.maxDrop} m, ${r.stats.maxVertG}g/${r.stats.minVertG}g vertical, ${r.stats.maxLatG}g lateral, ${r.stats.airtime} s airtime.`] : []),
         `Reliability ${Math.round(r.reliability / 100)}%, last inspected day ${r.lastInspected + 1}. Queue ${r.queue.length}/${queueCapacity(park.s, r)}.`,
         `Satisfaction ${sat === null ? 'n/a' : sat + '%'}; ${r.customers} customers; ${cr(r.incomeWeek)} this week.`,
         ...[...why].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `  ${n}× "${k}"`),
@@ -241,6 +243,23 @@ export const COMMANDS: Record<string, Cmd> = {
   'marketing start': { usage: 'marketing start <flyers|billboard|freeEntry> [weeks]', summary: 'Run a campaign', run(park, pos) { return need(pos, 1, this.usage) ?? fromAction(park, 'marketing.start', { kind: pos[0], weeks: pos[1] !== undefined ? +pos[1] : undefined }); } },
   'marketing list': { usage: 'marketing list', summary: 'Running campaigns', run(park) { const m = park.s.campaigns; return { ok: true, text: m.length ? m.map((x) => `${x.kind}: ${x.weeksLeft} week(s) left`).join('\n') : 'No campaigns running.', json: m }; } },
   'loan set': { usage: 'loan set <cr>', summary: 'Borrow or repay', run(park, pos) { return need(pos, 1, this.usage) ?? fromAction(park, 'loan.set', { amount: pos[0] }); } },
+  'coaster start': {
+    usage: 'coaster start <x> <y> [--dir 0-3] [--name "…"]', summary: 'Start a coaster: 3-tile station heading dir (1 = east); entrance on the left of the middle tile',
+    run(park, pos, f) { return need(pos, 2, this.usage) ?? fromAction(park, 'coaster.start', { x: +pos[0], y: +pos[1], dir: f.dir !== undefined ? +f.dir : undefined, name: typeof f.name === 'string' ? f.name : undefined }); },
+  },
+  'coaster add': {
+    usage: 'coaster add <piece> [count] [--ride "…"]', summary: 'Add track pieces to the open end (see: pw coaster pieces)',
+    run(park, pos, f) { return need(pos, 1, this.usage) ?? fromAction(park, 'coaster.add', { piece: pos[0], count: pos[1] !== undefined ? +pos[1] : undefined, ride: typeof f.ride === 'string' ? f.ride : undefined }); },
+  },
+  'coaster undo': { usage: 'coaster undo [--ride "…"]', summary: 'Remove the last piece (refunded)', run(park, _p, f) { return fromAction(park, 'coaster.undo', { ride: typeof f.ride === 'string' ? f.ride : undefined }); } },
+  'coaster test': { usage: 'coaster test [--ride "…"]', summary: 'Test run: checks the circuit, simulates a train, rates the ride', run(park, _p, f) { return fromAction(park, 'coaster.test', { ride: typeof f.ride === 'string' ? f.ride : undefined }); } },
+  'coaster pieces': {
+    usage: 'coaster pieces', summary: 'Track pieces and what they cost',
+    run() {
+      const rows = Object.values(PIECES).filter((p) => !p.station).map((p) => `${p.id.padEnd(10)} ${p.name.padEnd(16)} ${cr(p.cost).padStart(8)}  ${p.dz > 0 ? `+${p.dz * LEVEL_M} m` : p.dz < 0 ? `${p.dz * LEVEL_M} m` : 'level'}${p.wide ? ', 2×2 tiles, gentle' : p.turn ? ', 1 tile, tight' : ''}${p.lift ? ', chain' : ''}${p.brakes ? `, slows to 3 m/s` : ''}`);
+      return { ok: true, text: [...rows, 'Turns are right/left relative to the direction of travel. Big drops and airtime are exciting; tight fast turns are intense.'].join('\n'), json: PIECES };
+    },
+  },
   'fee set': { usage: 'fee set <cr>', summary: 'Park entry fee', run(park, pos) { return need(pos, 1, this.usage) ?? fromAction(park, 'park.fee', { fee: pos[0] }); } },
 };
 
