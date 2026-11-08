@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { rotatedSize, entranceFor, sceneryByName, type Dir } from '@parkwright/sim';
+import { rotatedSize, entranceFor, sceneryByName, stationEntrance, type Dir } from '@parkwright/sim';
 import type { Game } from '../game.ts';
 import type { World } from '../render/world.ts';
 import { mat } from '../render/models.ts';
@@ -10,6 +10,7 @@ export type Tool =
   | { kind: 'path'; queue: boolean }
   | { kind: 'ride'; type: string; rot: Dir }
   | { kind: 'scenery'; scenery: string }
+  | { kind: 'coaster'; dir: Dir }
   | { kind: 'bin' }
   | { kind: 'bulldoze' };
 
@@ -74,6 +75,21 @@ export class Tools {
 
   rotate() {
     if (this.tool.kind === 'ride') { this.tool = { ...this.tool, rot: ((this.tool.rot + 1) & 3) as Dir }; this.preview(); this.onChange(); }
+    if (this.tool.kind === 'coaster') { this.tool = { ...this.tool, dir: ((this.tool.dir + 1) & 3) as Dir }; this.preview(); this.onChange(); }
+  }
+
+  /** The coaster currently under construction (untested), if any. */
+  building() {
+    return [...this.game.s.rides].reverse().find((r) => r.track && !r.ratings);
+  }
+
+  /** Run a coaster action from the builder panel. */
+  coaster(type: string, params: Record<string, unknown>, cmd: string) {
+    const r = this.exec(type, params, cmd);
+    if (r.ok && r.message) toast(r.message);
+    if (r.ok && r.focus) this.world.focus(r.focus.x, r.focus.y);
+    this.onChange();
+    return r;
   }
 
   private line(a: [number, number], b: [number, number]): [number, number, number, number] {
@@ -116,6 +132,11 @@ export class Tools {
       return;
     }
     if (t.kind === 'bin') { this.exec('bin.place', { x, y }, `pw bin place ${x} ${y}`); return; }
+    if (t.kind === 'coaster') {
+      if (this.building()) { toast('finish or test the coaster you are building first', 'err', 'use the track pieces in the panel'); return; }
+      this.coaster('coaster.start', { x, y, dir: t.dir }, `pw coaster start ${x} ${y} --dir ${t.dir}`);
+      return;
+    }
     void s;
   }
 
@@ -170,6 +191,13 @@ export class Tools {
       return;
     }
     if (t.kind === 'bin') box(at[0], at[1], 1, 1, this.game.park.query('bin.place', { x: at[0], y: at[1] }).ok, 0.2);
+    if (t.kind === 'coaster' && !this.building()) {
+      const ok = this.game.park.query('coaster.start', { x: at[0], y: at[1], dir: t.dir }).ok;
+      const dx = [0, 1, 0, -1][t.dir], dy = [-1, 0, 1, 0][t.dir];
+      for (let i = 0; i < 3; i++) box(at[0] + dx * i, at[1] + dy * i, 1, 1, ok, 0.15);
+      const [ex, ey] = stationEntrance(at[0], at[1], t.dir);
+      box(ex, ey, 1, 1, ok, 0.06);
+    }
     if (t.kind === 'select') box(at[0], at[1], 1, 1, true, 0.03);
   }
 }

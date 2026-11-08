@@ -1,4 +1,4 @@
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, SCENERY, findRide, queueCapacity, valueForMoney, type Dir } from '@parkwright/sim';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, PIECES, SCENERY, endPose, findRide, isClosed, queueCapacity, valueForMoney, type Dir } from '@parkwright/sim';
 import type { Game } from '../game.ts';
 import type { Tools } from './tools.ts';
 import { $, cr, h, toast } from './dom.ts';
@@ -76,6 +76,7 @@ export class Hud {
       btn('bulldoze', 'Clear', t.kind === 'bulldoze', () => { this.drawer = null; this.tools.set({ kind: 'bulldoze' }); }),
     );
     const d = $('#drawer');
+    if (t.kind === 'coaster') { d.classList.add('open'); this.renderCoasterBuilder(d); return; }
     if (!this.drawer) { d.classList.remove('open'); return; }
     d.classList.add('open');
     const c = this.game.content;
@@ -88,8 +89,11 @@ export class Hud {
     }
     const kinds = this.drawer === 'rides' ? ['flat'] : ['stall', 'facility'];
     const types = Object.values(c.rideTypes).filter((r) => kinds.includes(r.kind));
+    const coasterCard = this.drawer === 'rides' ? h('button', { class: 'card', onclick: () => { this.drawer = null; this.tools.set({ kind: 'coaster', dir: 1 }); } },
+      h('i', { class: 'sw', style: 'background:#b07a4a' }), h('b', {}, 'Timber Coaster'), h('small', {}, 'build it piece by piece · from 300 cr')) : '';
     d.replaceChildren(
       h('h3', {}, this.drawer === 'rides' ? 'Rides' : 'Stalls & facilities'),
+      coasterCard,
       ...types.map((r) => h('button', { class: `card ${t.kind === 'ride' && t.type === r.id ? 'on' : ''}`, onclick: () => this.tools.set({ kind: 'ride', type: r.id, rot: (t.kind === 'ride' ? t.rot : 2) as Dir }) },
         h('i', { class: 'sw', style: `background:${r.color}` }),
         h('b', {}, r.name),
@@ -103,6 +107,36 @@ export class Hud {
   private pressing = false;
 
   /** Re-render the side panel; on the timer only when what it shows has changed (so clicks aren't lost). */
+  private renderCoasterBuilder(d: HTMLElement) {
+    const r = this.tools.building();
+    const t = this.tools.tool as { kind: 'coaster'; dir: Dir };
+    if (!r) {
+      d.replaceChildren(
+        h('h3', {}, 'Timber Coaster'),
+        h('p', { class: 'tip' }, `Click a tile to place the 3-tile station heading ${['north', 'east', 'south', 'west'][t.dir]}. R turns it. The entrance goes on its left.`),
+        h('button', { onclick: () => this.tools.set({ kind: 'select' }) }, 'Cancel'),
+      );
+      return;
+    }
+    const closed = isClosed(r.track!);
+    const end = endPose(r.track!);
+    const add = (piece: string) => this.tools.coaster('coaster.add', { piece, ride: r.id }, `pw coaster add ${piece}`);
+    const groups: [string, string[]][] = [['Straight', ['straight', 'lift', 'brakes']], ['Turns', ['left', 'right', 'bigleft', 'bigright']], ['Hills', ['up', 'down', 'steepup', 'steepdown']]];
+    d.replaceChildren(
+      h('h3', {}, r.name),
+      h('p', { class: 'tip' }, closed ? 'Circuit closed — run a test to rate it.' : `Open end at ${end!.x},${end!.y}, ${end!.z * 2} m up. Bring it back to the station at ground level.`),
+      ...groups.map(([label, ids]) => h('div', { class: 'pieces' }, h('label', {}, label), ...ids.map((id) => h('button', { disabled: closed, title: `${PIECES[id].name} · ${cr(PIECES[id].cost)}`, onclick: () => add(id) }, PIECES[id].name.replace(' turn', ''))))),
+      h('div', { class: 'row' },
+        h('button', { onclick: () => this.tools.coaster('coaster.undo', { ride: r.id }, 'pw coaster undo') }, 'Undo'),
+        h('button', { class: 'primary', disabled: !closed, onclick: () => {
+          const res = this.tools.coaster('coaster.test', { ride: r.id }, 'pw coaster test');
+          if (res.ok) { this.game.run('ride.open', { ride: r.id }); this.tools.set({ kind: 'select' }); this.selected = r.id; this.renderSide(); }
+        } }, 'Test & open'),
+      ),
+      h('p', { class: 'tip' }, 'Lifts pull the train up; drops and airtime make it exciting; fast tight turns make it intense. Wide turns are gentler but take 2×2 tiles.'),
+    );
+  }
+
   private renderSide(force = true) {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
@@ -125,6 +159,7 @@ export class Hud {
         h('header', {}, h('h2', {}, r.name), h('button', { class: 'x', onclick: () => { this.selected = null; side.classList.remove('open'); } }, '×')),
         h('div', { class: `status ${r.status}` }, r.status),
         attraction && r.ratings ? h('div', {}, ratingRow('Excitement', r.ratings.e), ratingRow('Intensity', r.ratings.i), ratingRow('Nausea', r.ratings.n)) : '',
+        r.stats ? h('p', { class: 'muted' }, `${r.stats.length} m · ${r.stats.duration} s · top ${r.stats.maxSpeed} m/s · drop ${r.stats.maxDrop} m · ${r.stats.maxVertG}g / ${r.stats.minVertG}g · ${r.stats.maxLatG}g lateral`) : '',
         h('div', { class: 'price' },
           h('label', {}, t.kind === 'stall' ? `${c.items[t.item!].name} price` : 'Ticket'),
           h('button', { onclick: () => run('ride.price', { ride: r.id, price: Math.max(0, r.price - 10) / 100 }) }, '−'),
