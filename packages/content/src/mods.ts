@@ -24,10 +24,12 @@ const num = (v: unknown, lo: number, hi: number, dflt: number) => {
   return Number.isFinite(n) ? Math.round(Math.max(lo, Math.min(hi, n))) : dflt;
 };
 const text = (v: unknown, max: number, dflt: string) => {
-  const s = typeof v === 'string' ? v.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max) : '';
+  // Strip C0 and C1 control characters (no terminal escape sequences) and angle brackets.
+  const s = typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f<>]/g, '').trim().slice(0, max) : '';
   return s || dflt;
 };
-const slug = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+/** Lowercase letters, digits and single dashes only — so "--" can only ever be our namespace separator. */
+const slug = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24).replace(/-+$/, '');
 const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : '#c080e0');
 
 /** Validate a mod. Throws with a plain-language reason when nothing usable is left. */
@@ -36,8 +38,10 @@ export function validateMod(raw: unknown, base: Content): { mod: ModFile; warnin
   const r = raw as Record<string, any>;
   const warnings: string[] = [];
   const name = text(r.name, 40, 'Untitled mod');
+  if (Array.isArray(r.rideTypes) && r.rideTypes.length > 50) throw new Error('too many ride types');
   const packId = `mod-${slug(name) || 'untitled'}`;
-  const ns = (id: string) => (id.startsWith(`${packId}--`) ? id : `${packId}--${slug(id) || 'x'}`);
+  // Always rebuilt from a slug (never passed through), so ids are safe to print and can't collide across packs.
+  const ns = (id: string) => `${packId}--${slug(id.startsWith(`${packId}--`) ? id.slice(packId.length + 2) : id) || 'x'}`;
 
   const items: ItemType[] = [];
   for (const it of Array.isArray(r.items) ? r.items.slice(0, 6) : []) {
@@ -75,14 +79,20 @@ export function validateMod(raw: unknown, base: Content): { mod: ModFile; warnin
       item = ref;
     }
     const ratings = small ? { e: 0, i: 0, n: 0 } : { e: num(t.ratings?.e, 0, 1000, 200), i: num(t.ratings?.i, 0, 1000, 200), n: num(t.ratings?.n, 0, 1000, 100) };
+    // Balance: excitement costs money (≥ 6 cr per 0.01 E, like the base rides), and throughput is
+    // capped at 1 rider per 12 ticks of cycle, so a mod can't mint a cheap, endless crowd-pleaser.
+    const cycleTicks = small ? num(t.cycleTicks, 20, 120, 40) : num(t.cycleTicks, 240, 1200, 360);
+    const minCost = small ? 5000 : Math.max(50_000, ratings.e * 600);
+    const cost = num(t.cost, minCost, 2_000_000, Math.max(minCost, 100_000));
+    if (!small && Number(t.cost) < minCost) warnings.push(`${t.name ?? t.id}: cost raised to ${minCost / 100} cr to match its excitement`);
     rideTypes.push({
       id: ns(String(t.id ?? t.name ?? 'ride')), name: text(t.name, 30, 'Ride'), kind, size,
-      cost: num(t.cost, 5000, 2_000_000, 100_000), upkeep: num(t.upkeep, 0, 20_000, 3000),
-      capacity: num(t.capacity, 1, 40, small ? 1 : 12), cycleTicks: small ? num(t.cycleTicks, 20, 120, 40) : num(t.cycleTicks, 120, 1200, 360),
+      cost, upkeep: num(t.upkeep, 0, 20_000, 3000),
+      capacity: small ? num(t.capacity, 1, 4, 1) : num(t.capacity, 1, Math.min(40, Math.floor(cycleTicks / 12)), 12), cycleTicks,
       ratings, wear: num(t.wear, 0, 200, 50), defaultPrice: num(t.defaultPrice, 0, 5000, 200),
       ...(item ? { item } : {}),
       ...(kind === 'facility' ? { serviceEffect: { bladder: -255, happy: 10 } } : {}),
-      draw: num(t.draw, 0, 60, small ? 2 : 18), model, color: hex(t.color),
+      draw: num(t.draw, 0, small ? 4 : 40, small ? 2 : 18), model, color: hex(t.color),
     });
   }
 
@@ -99,7 +109,7 @@ export function validateMod(raw: unknown, base: Content): { mod: ModFile; warnin
     }
     if (['flat', 'stall', 'facility'].includes(ru.when?.kind)) when.kind = ru.when.kind;
     if (typeof ru.veto === 'string') rules.push({ on: ru.on, when, veto: text(ru.veto, 80, 'not allowed by a mod') });
-    else if (ru.cost !== undefined) rules.push({ on: ru.on, when, cost: Math.max(0.1, Math.min(5, Number(ru.cost) || 1)) });
+    else if (ru.cost !== undefined) rules.push({ on: ru.on, when, cost: Math.max(0.5, Math.min(5, Number(ru.cost) || 1)) });
   }
 
   if (!rideTypes.length && !items.length && !rules.length) throw new Error('the mod has no usable ride types, items or rules');
