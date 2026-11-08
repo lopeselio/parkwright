@@ -22,10 +22,27 @@ function grassFree(park: Park, x: number, y: number) {
   return s.tiles[k] === Tile.Grass && s.occ[k] === 0 && s.scenery[k] === 0;
 }
 
-/** Shortest run of free grass from a start tile to any existing path tile (BFS), excluding `blocked`. */
-function linkPath(park: Park, sx: number, sy: number, blocked: Set<number>): [number, number][] | null {
+/** Path tiles visitors can actually reach from the gate. */
+function gateNetwork(park: Park): Set<number> {
   const s = park.s;
-  if (isPath(park.s, sx, sy)) return [];
+  const seen = new Set<number>([idx(s, s.gate[0], s.gate[1])]);
+  const q = [idx(s, s.gate[0], s.gate[1])];
+  for (let i = 0; i < q.length; i++) {
+    const x = q[i] % s.w, y = (q[i] - x) / s.w;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + DX[d], ny = y + DY[d];
+      if (!isPath(s, nx, ny)) continue;
+      const k = idx(s, nx, ny);
+      if (!seen.has(k)) { seen.add(k); q.push(k); }
+    }
+  }
+  return seen;
+}
+
+/** Shortest run of free grass from a start tile to a path tile on the gate's network (BFS), excluding `blocked`. */
+function linkPath(park: Park, sx: number, sy: number, blocked: Set<number>, network: Set<number>): [number, number][] | null {
+  const s = park.s;
+  if (network.has(idx(s, sx, sy))) return [];
   if (!grassFree(park, sx, sy) || blocked.has(idx(s, sx, sy))) return null;
   const prev = new Map<number, number>();
   const start = idx(s, sx, sy);
@@ -40,7 +57,7 @@ function linkPath(park: Park, sx: number, sy: number, blocked: Set<number>): [nu
         if (!inBounds(s, nx, ny)) continue;
         const nk = idx(s, nx, ny);
         if (prev.has(nk)) continue;
-        if (isPath(s, nx, ny)) {
+        if (network.has(nk)) {
           const route: [number, number][] = [];
           for (let c = k; c !== -1; c = prev.get(c)!) route.push([c % s.w, Math.floor(c / s.w)]);
           return route;
@@ -73,6 +90,7 @@ export function placeRide(park: Park, typeRef: string, near?: { x: number; y: nu
   if (!t || !type) return { ok: false, message: `unknown ride type "${typeRef}" — types: ${Object.values(park.c.rideTypes).filter((x) => x.kind !== 'track').map((x) => x.id).join(', ')}` };
   if (t.kind === 'track') return { ok: false, message: 'coasters are built piece by piece (pw coaster start)' };
   const target = near ?? { x: s.gate[0], y: Math.max(0, s.gate[1] - 6) };
+  const network = gateNetwork(park);
   let tried = 0;
   for (const [x, y] of around(park, target.x, target.y)) {
     if (++tried > 4000) break;
@@ -80,12 +98,13 @@ export function placeRide(park: Park, typeRef: string, near?: { x: number; y: nu
       const [w, h] = rotatedSize(t.size[0], t.size[1], rot);
       // Keep a 1-tile margin from the edge so paths can go around.
       if (x < 1 || y < 1 || x + w > s.w - 1 || y + h > s.h - 1) continue;
-      if (!park.query('ride.build', { type, x, y, rot }).ok) continue;
+      const q = park.query('ride.build', { type, x, y, rot });
+      if (!q.ok) continue;
       const [ex, ey] = entranceFor(x, y, w, h, rot);
       const footprint = new Set<number>();
       for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) footprint.add(idx(s, i, j));
       let route: [number, number][] | null;
-      if (isPath(s, ex, ey)) route = [];
+      if (network.has(idx(s, ex, ey))) route = [];
       else {
         // The entrance tile becomes part of the ride, so connect from a free neighbour of it.
         footprint.add(idx(s, ex, ey));
@@ -93,16 +112,21 @@ export function placeRide(park: Park, typeRef: string, near?: { x: number; y: nu
         for (let d = 0; d < 4 && route === null; d++) {
           const ax = ex + DX[d], ay = ey + DY[d];
           if (footprint.has(idx(s, ax, ay)) && !isPath(s, ax, ay)) continue;
-          route = linkPath(park, ax, ay, footprint);
+          route = linkPath(park, ax, ay, footprint, network);
         }
       }
       if (route === null) continue;
-      const cost = t.cost + route.length * 1000;
+      // Hook-adjusted cost of the ride (mods can change it) plus the path tiles.
+      const pathCost = route.length ? park.query('path.place', { x: route[0][0], y: route[0][1] }) : null;
+      const cost = q.cost + route.length * (pathCost?.ok ? pathCost.cost : 1000);
       if (cost > s.cash) return { ok: false, message: `found a spot at ${x},${y} but it needs ${(cost / 100).toFixed(0)} cr (you have ${(s.cash / 100).toFixed(0)})` };
       const b = park.run('ride.build', { type, x, y, rot }, actor);
       if (!b.ok) continue;
-      for (const [px, py] of route) park.run('path.place', { x: px, y: py }, actor);
       const id = (b.data as { id: number }).id;
+      for (const [px, py] of route) {
+        const r = park.run('path.place', { x: px, y: py }, actor);
+        if (!r.ok) return { ok: false, rideId: id, focus: { x, y }, message: `built ${t.name} at ${x},${y} but couldn't finish its path at ${px},${py}: ${r.error}` };
+      }
       return { ok: true, rideId: id, focus: { x, y }, message: `built ${t.name} at ${x},${y} (entrance ${ex},${ey})${route.length ? ` and laid ${route.length} path tile${route.length > 1 ? 's' : ''} to connect it` : ', opening onto the path'}` };
     }
   }
