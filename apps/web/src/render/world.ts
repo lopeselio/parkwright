@@ -50,7 +50,9 @@ export class World {
   zoom = 14;
   private yawTo = Math.PI / 4;
 
-  constructor(canvas: HTMLCanvasElement, private s: () => ParkState, private c: Content) {
+  private get c(): Content { return this.content(); }
+
+  constructor(canvas: HTMLCanvasElement, private s: () => ParkState, private content: () => Content) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
     this.renderer.shadowMap.enabled = true;

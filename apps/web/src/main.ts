@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './game.ts';
 import { Cloud } from './cloud.ts';
+import { AiTerminal } from './ai.ts';
 import { World } from './render/world.ts';
 import { Tools } from './ui/tools.ts';
 import { Hud } from './ui/hud.ts';
@@ -9,12 +10,13 @@ import { $, toast } from './ui/dom.ts';
 
 const game = new Game();
 const canvas = $<HTMLCanvasElement>('#view');
-const world = new World(canvas, () => game.s, game.content);
+const world = new World(canvas, () => game.s, () => game.content);
 const tools = new Tools(game, world, canvas);
 
 const termHost = $('#terminal');
 const terminal = new ParkTerminal(game, $('#term-body'));
 terminal.onFocus = (x, y) => world.focus(x, y);
+new AiTerminal(game, terminal);
 tools.onCommand = (cmd) => terminal.echo(cmd);
 const toggleTerminal = (open = !termHost.classList.contains('open')) => {
   termHost.classList.toggle('open', open);
