@@ -2,10 +2,14 @@
 //!
 //! - **Credits** are an NEP-141 token (symbol CR, 2 decimals: 1 credit = 100 units = 100 in-game cents).
 //! - **Patrons** are agent accounts (one per visitor group). Each holds a credit budget and has a daily
-//!   cap set by the admin. A patron signs its own `settle_day` with a function-call key that can do
-//!   nothing else, so even the server running the agents can't move more than the cap per park-day.
-//! - **Parks** hold the credits visitors spent in escrow; the park owner withdraws them.
-//! - **Settlement** is idempotent per (patron, park, day): a day can never be paid twice.
+//!   cap (at most MAX_DAY_CAP). A patron signs its own `settle_day` with a function-call key that can do
+//!   nothing else.
+//! - **Parks** are registered by the admin (the game server) and hold what visitors spent in escrow;
+//!   the owner withdraws it.
+//! - **Settlement** is idempotent per (patron, park, day), bounded per park-day across all patrons
+//!   (PARK_DAY_CAP), and a park's days can't run ahead of real time.
+//! - **Minting** patron budgets is limited to MINT_PER_EPOCH per 24 hours, so even a leaked admin key
+//!   can only create a bounded amount of credits per day.
 //!
 //! The game's rules (who rides what, what it costs) live in the simulation, not here. This contract
 //! only moves money, within limits it enforces itself.
@@ -19,6 +23,18 @@ const MAX_LINES: usize = 40;
 const MAX_VENUE_LEN: usize = 24;
 const MAX_NAME_LEN: usize = 40;
 const MAX_HASH_LEN: usize = 64;
+/** Most a patron may be allowed per park-day (set_patron can't go higher). 2,000 CR. */
+pub const MAX_DAY_CAP: u128 = 200_000;
+/** Most all patrons together may settle into one park for one day. 5,000 CR. */
+pub const PARK_DAY_CAP: u128 = 500_000;
+/** Most credits fund_patrons may mint per 24 h epoch. 200,000 CR. */
+pub const MINT_PER_EPOCH: u128 = 20_000_000;
+const EPOCH_MS: u64 = 86_400_000;
+/** A park day takes at least this long in real time (90 s at 1×, so this allows up to 4.5×). */
+pub const GAME_DAY_MIN_MS: u64 = 20_000;
+const DAY_SLACK: u64 = 2;
+/** Recent park-days kept per park for the park-day cap (fixed size: storage stays bounded). */
+const RING: usize = 8;
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone)]
@@ -31,6 +47,8 @@ pub struct Park {
     pub earned: U128,
     pub settlements: u32,
     pub created_ms: u64,
+    /// (day, total settled that day) for the most recent park-days.
+    pub recent_days: Vec<(u32, U128)>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -74,12 +92,14 @@ pub struct Contract {
     patrons: LookupMap<AccountId, Patron>,
     /// "patron|park" → last settled day.
     last_day: LookupMap<String, u32>,
-    /// "park|venue" → credits settled to that venue.
-    venue_totals: LookupMap<String, u128>,
     balances: LookupMap<AccountId, u128>,
     /// How many parks each account owns (so membership checks are O(1)).
     owners: LookupMap<AccountId, u32>,
     total_supply: u128,
+    /// Credits held in park escrow (so audit is O(1)).
+    escrow_total: u128,
+    mint_epoch: u64,
+    minted_in_epoch: u128,
 }
 
 fn emit(event: &str, data: serde_json::Value) {
@@ -106,13 +126,15 @@ impl Contract {
     pub fn new(admin: AccountId) -> Self {
         Self {
             admin,
-            parks: IterableMap::new(b"p"),
+            parks: IterableMap::new(b"q"),
             patrons: LookupMap::new(b"a"),
             last_day: LookupMap::new(b"d"),
-            venue_totals: LookupMap::new(b"v"),
             balances: LookupMap::new(b"b"),
             owners: LookupMap::new(b"o"),
             total_supply: 0,
+            escrow_total: 0,
+            mint_epoch: 0,
+            minted_in_epoch: 0,
         }
     }
 
@@ -131,18 +153,18 @@ impl Contract {
 
     // ---------------- parks ----------------
 
-    /// Register a park. Anyone can register their own; the admin may register one for another owner
-    /// (the game server does this for players who haven't linked a NEAR account yet).
+    /// Register a park (admin only: the game server registers each cloud park, owned by the admin
+    /// until a player claims it via transfer_park). Admin-only so nobody can front-run a park id,
+    /// and so the contract's storage can't be spammed.
     pub fn register_park(&mut self, park_id: String, name: String, owner: Option<AccountId>) {
+        self.assert_admin();
         require!(valid_park_id(&park_id), "park_id must be 8–32 lowercase letters or digits");
         require!(!name.trim().is_empty() && name.len() <= MAX_NAME_LEN, "name must be 1–40 characters");
         require!(self.parks.get(&park_id).is_none(), "that park is already registered");
-        let caller = env::predecessor_account_id();
-        let owner = owner.unwrap_or_else(|| caller.clone());
-        require!(owner == caller || caller == self.admin, "you can only register parks you own");
+        let owner = owner.unwrap_or_else(|| self.admin.clone());
         self.parks.insert(
             park_id.clone(),
-            Park { owner: owner.clone(), name: name.clone(), balance: U128(0), earned: U128(0), settlements: 0, created_ms: env::block_timestamp_ms() },
+            Park { owner: owner.clone(), name: name.clone(), balance: U128(0), earned: U128(0), settlements: 0, created_ms: env::block_timestamp_ms(), recent_days: vec![] },
         );
         self.add_owner(&owner, 1);
         emit("park_registered", json!({ "park_id": park_id, "owner": owner, "name": name }));
@@ -172,6 +194,7 @@ impl Contract {
         require!(amt > 0, "nothing to withdraw");
         require!(amt <= park.balance.0, "that is more than the park holds");
         park.balance = U128(park.balance.0 - amt);
+        self.escrow_total -= amt;
         let owner = park.owner.clone();
         self.parks.insert(park_id.clone(), park);
         let b = self.balance(&owner);
@@ -185,7 +208,7 @@ impl Contract {
     /// Admin: register or update a patron agent and its daily cap.
     pub fn set_patron(&mut self, patron: AccountId, day_cap: U128, active: bool) {
         self.assert_admin();
-        require!(day_cap.0 > 0, "day_cap must be positive");
+        require!(day_cap.0 > 0 && day_cap.0 <= MAX_DAY_CAP, "day_cap must be 1–200000 (2,000 CR)");
         let spent = self.patrons.get(&patron).map(|p| p.spent).unwrap_or(U128(0));
         self.patrons.insert(patron.clone(), Patron { day_cap, spent, active });
         emit("patron_set", json!({ "patron": patron, "day_cap": day_cap, "active": active }));
@@ -196,6 +219,11 @@ impl Contract {
         self.assert_admin();
         require!(!patrons.is_empty() && patrons.len() <= 50, "fund 1–50 patrons at a time");
         require!(amount.0 > 0, "amount must be positive");
+        let epoch = env::block_timestamp_ms() / EPOCH_MS;
+        if epoch != self.mint_epoch { self.mint_epoch = epoch; self.minted_in_epoch = 0; }
+        let total = amount.0.checked_mul(patrons.len() as u128).unwrap_or_else(|| env::panic_str("overflow"));
+        require!(self.minted_in_epoch + total <= MINT_PER_EPOCH, "over today's minting budget");
+        self.minted_in_epoch += total;
         for p in patrons {
             require!(self.patrons.get(&p).is_some(), "not a registered patron");
             let b = self.balance(&p);
@@ -215,6 +243,9 @@ impl Contract {
         let mut park = self.parks.get(&park_id).cloned().unwrap_or_else(|| env::panic_str("no such park"));
         require!(!lines.is_empty() && lines.len() <= MAX_LINES, "1–40 lines per settlement");
         require!(state_hash.len() <= MAX_HASH_LEN, "state_hash too long");
+        // A park's days can't run ahead of real time.
+        let elapsed = env::block_timestamp_ms().saturating_sub(park.created_ms);
+        require!((day as u64) <= elapsed / GAME_DAY_MIN_MS + DAY_SLACK, "that day hasn't happened yet");
         let key = format!("{patron_id}|{park_id}");
         if let Some(last) = self.last_day.get(&key) {
             require!(day > *last, "that day is already settled");
@@ -228,17 +259,29 @@ impl Contract {
         require!(sum <= patron.day_cap.0, "over this patron's daily cap");
         let bal = self.balance(&patron_id);
         require!(sum <= bal, "the patron's budget is too low");
+        // Park-day cap across all patrons, tracked in a fixed-size ring of recent days.
+        let slot = match park.recent_days.iter().position(|(d, _)| *d == day) {
+            Some(i) => i,
+            None => {
+                if park.recent_days.len() >= RING {
+                    let (oldest_i, oldest) = park.recent_days.iter().enumerate().min_by_key(|(_, (d, _))| *d).map(|(i, (d, _))| (i, *d)).unwrap();
+                    require!(day > oldest, "that day is too old to settle now");
+                    park.recent_days.remove(oldest_i);
+                }
+                park.recent_days.push((day, U128(0)));
+                park.recent_days.len() - 1
+            }
+        };
+        let day_total = park.recent_days[slot].1.0 + sum;
+        require!(day_total <= PARK_DAY_CAP, "over this park's daily cap");
+        park.recent_days[slot].1 = U128(day_total);
 
         self.balances.insert(patron_id.clone(), bal - sum);
         self.last_day.insert(key, day);
-        for l in &lines {
-            let vk = format!("{park_id}|{}", l.venue);
-            let v = self.venue_totals.get(&vk).copied().unwrap_or(0);
-            self.venue_totals.insert(vk, v + l.amount.0);
-        }
         park.balance = U128(park.balance.0 + sum);
         park.earned = U128(park.earned.0 + sum);
         park.settlements += 1;
+        self.escrow_total += sum;
         self.parks.insert(park_id.clone(), park);
         self.patrons.insert(patron_id.clone(), Patron { spent: U128(patron.spent.0 + sum), ..patron });
         emit(
@@ -310,14 +353,68 @@ impl Contract {
         self.last_day.get(&format!("{patron}|{park_id}")).copied()
     }
 
-    pub fn venue_total(&self, park_id: String, venue: String) -> U128 {
-        U128(self.venue_totals.get(&format!("{park_id}|{venue}")).copied().unwrap_or(0))
+    /// Supply, escrow and today's minting. Credits in accounts = total_supply − park_escrow.
+    pub fn audit(&self) -> serde_json::Value {
+        json!({
+            "total_supply": U128(self.total_supply),
+            "park_escrow": U128(self.escrow_total),
+            "minted_today": U128(if env::block_timestamp_ms() / EPOCH_MS == self.mint_epoch { self.minted_in_epoch } else { 0 }),
+            "mint_budget": U128(MINT_PER_EPOCH),
+        })
     }
 
-    /// Escrow held for parks + credits in accounts must always equal the total supply.
-    pub fn audit(&self) -> serde_json::Value {
-        let escrow: u128 = self.parks.values().map(|p| p.balance.0).sum();
-        json!({ "total_supply": U128(self.total_supply), "park_escrow": U128(escrow) })
+    /// Upgrade from v1 state: parks gain the recent-days ring (and move to a new map prefix),
+    /// per-venue totals are dropped (events carry the lines), escrow and mint epoch are tracked.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        let old: v1::Contract = env::state_read().unwrap_or_else(|| env::panic_str("no v1 state"));
+        let mut parks: IterableMap<String, Park> = IterableMap::new(b"q");
+        let mut escrow = 0u128;
+        let mut old_parks = old.parks;
+        for (id, p) in old_parks.iter() {
+            escrow += p.balance.0;
+            parks.insert(id.clone(), Park { owner: p.owner.clone(), name: p.name.clone(), balance: p.balance, earned: p.earned, settlements: p.settlements, created_ms: p.created_ms, recent_days: vec![] });
+        }
+        old_parks.clear();
+        old_parks.flush();
+        parks.flush();
+        Self {
+            admin: old.admin,
+            parks,
+            patrons: old.patrons,
+            last_day: old.last_day,
+            balances: old.balances,
+            owners: old.owners,
+            total_supply: old.total_supply,
+            escrow_total: escrow,
+            mint_epoch: 0,
+            minted_in_epoch: 0,
+        }
+    }
+}
+
+mod v1 {
+    use super::*;
+    #[near(serializers = [borsh])]
+    pub struct Park {
+        pub owner: AccountId,
+        pub name: String,
+        pub balance: U128,
+        pub earned: U128,
+        pub settlements: u32,
+        pub created_ms: u64,
+    }
+    #[near(serializers = [borsh])]
+    pub struct Contract {
+        pub admin: AccountId,
+        pub parks: IterableMap<String, Park>,
+        pub patrons: LookupMap<AccountId, super::Patron>,
+        pub last_day: LookupMap<String, u32>,
+        pub venue_totals: LookupMap<String, u128>,
+        pub balances: LookupMap<AccountId, u128>,
+        pub owners: LookupMap<AccountId, u32>,
+        pub total_supply: u128,
     }
 }
 
