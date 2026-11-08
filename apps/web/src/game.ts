@@ -45,36 +45,54 @@ export class Game {
 
   /** Re-validate and load a set of mods (also used when opening a park that brings its own). */
   private setMods(mods: ModFile[]) {
-    const ok: ModFile[] = [];
-    for (const m of mods) {
-      try {
-        // Re-validate on every load: a stored or shared mod is untrusted input too.
-        const { mod } = validateMod({ name: m.pack.name, summary: m.summary, rideTypes: m.pack.rideTypes, items: m.pack.items, rules: m.rules }, buildContent([basePack, ...ok.map((x) => x.pack)]));
-        if (!ok.some((x) => x.pack.id === mod.pack.id)) ok.push(mod);
-      } catch { /* skip a broken mod */ }
-    }
-    this.mods = ok;
-    this.content = buildContent([basePack, ...ok.map((m) => m.pack)]);
+    this.mods = validMods(mods);
+    this.content = buildContent([basePack, ...this.mods.map((m) => m.pack)]);
     if (this.park) { this.park.c = this.content; this.park.hooks = this.hooks(); }
   }
 
-  /** Load a validated mod into the running park. */
-  applyMod(mod: ModFile) {
+  /** What in the park would break if `mod`'s current version went away: its rides, and stalls selling its items. */
+  private usesOf(id: string): string[] {
+    const m = this.mods.find((x) => x.pack.id === id);
+    if (!m) return [];
+    const types = new Set(m.pack.rideTypes.map((t) => t.id));
+    const items = new Set(m.pack.items.map((i) => i.id));
+    return this.s.rides.filter((r) => types.has(r.type) || items.has(this.content.rideTypes[r.type]?.item ?? '')).map((r) => r.name);
+  }
+
+  /** Load a validated mod into the running park. Returns why not, or null. */
+  applyMod(mod: ModFile): string | null {
+    if (this.visiting) return "you're visiting someone else's park — go back to yours to change mods";
+    // Replacing a mod with the same name must not pull out rides or items the park still uses.
+    const old = this.mods.find((m) => m.pack.id === mod.pack.id);
+    if (old) {
+      const keepTypes = new Set(mod.pack.rideTypes.map((t) => t.id));
+      const keepItems = new Set(mod.pack.items.map((i) => i.id));
+      const lost = this.s.rides.filter((r) => (old.pack.rideTypes.some((t) => t.id === r.type) && !keepTypes.has(r.type))
+        || (old.pack.items.some((i) => i.id === this.content.rideTypes[r.type]?.item) && !keepItems.has(this.content.rideTypes[r.type]!.item!)));
+      if (lost.length) return `a mod called ${mod.pack.name} is already loaded and the park uses ${lost.map((r) => r.name).join(', ')} from it — rename the new one or demolish those first`;
+    }
     this.setMods([...this.mods.filter((m) => m.pack.id !== mod.pack.id), mod]);
     writeMods(this.mods);
     this.saveLocal();
+    return null;
   }
 
   /** Unload a mod, unless the park still uses something from it. */
   removeMod(id: string): string | null {
+    if (this.visiting) return "you're visiting someone else's park — go back to yours to change mods";
     const m = this.mods.find((x) => x.pack.id === id || x.pack.name.toLowerCase() === id.toLowerCase());
     if (!m) return `no mod "${id}" — try: mod list`;
-    const used = this.s.rides.filter((r) => m.pack.rideTypes.some((t) => t.id === r.type));
-    if (used.length) return `the park still has ${used.map((r) => r.name).join(', ')} from this mod — demolish them first`;
+    const used = this.usesOf(m.pack.id);
+    if (used.length) return `the park still uses ${used.join(', ')} from this mod — demolish them first`;
+    // Another mod's stall may sell this mod's item.
+    const items = new Set(m.pack.items.map((i) => i.id));
+    const dependents = this.mods.filter((x) => x !== m && x.pack.rideTypes.some((t) => t.item && items.has(t.item)));
+    if (dependents.length) return `${dependents.map((d) => d.pack.name).join(', ')} sells items from this mod — remove that first`;
     this.setMods(this.mods.filter((x) => x !== m));
     writeMods(this.mods);
     return null;
   }
+
 
   private wire() {
     this.unsub();
@@ -115,9 +133,9 @@ export class Game {
     return true;
   }
 
-  load(save: SaveFile) {
-    // A park brings its own mods; they replace what's loaded (they're re-validated first).
-    if (save.mods?.length) this.setMods(save.mods);
+  /** Load a park. Its own mods (re-validated) replace what's loaded; `persist` also keeps them as yours. */
+  load(save: SaveFile, persist = false) {
+    if (save.mods?.length) { this.setMods(save.mods); if (persist) writeMods(this.mods); }
     const why = this.incompatible(save);
     if (why) throw new Error(why);
     this.park = new Park(structuredClone(save.snapshot), this.content);
@@ -130,9 +148,11 @@ export class Game {
   incompatible(save: SaveFile): string | null {
     if (save?.v !== 1 || !save.snapshot) return 'not a Parkwright v1 save';
     const s = save.snapshot;
-    if (typeof s.scenario !== 'string' || !Object.hasOwn(this.content.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
+    // A park that brings its own mods is checked against base + those mods (validated), not ours.
+    const content = save.mods?.length ? buildContent([basePack, ...validMods(save.mods).map((m) => m.pack)]) : this.content;
+    if (typeof s.scenario !== 'string' || !Object.hasOwn(content.scenarios, s.scenario)) return `unknown scenario "${s.scenario}"`;
     if (!Array.isArray(s.rides) || s.rides.some((r) => !r || typeof r.type !== 'string')) return 'malformed rides';
-    const missing = s.rides.map((r) => r.type).filter((t) => !Object.hasOwn(this.content.rideTypes, t));
+    const missing = s.rides.map((r) => r.type).filter((t) => !Object.hasOwn(content.rideTypes, t));
     if (missing.length) return `this save needs ride types that aren't loaded: ${[...new Set(missing)].join(', ')}`;
     return null;
   }
@@ -177,6 +197,7 @@ export class Game {
       try { save = JSON.parse(raw) as SaveFile; } catch { this.shelve(raw, 'unreadable save'); return null; }
       const why = this.incompatible(save);
       if (why) { this.shelve(raw, why); return null; }
+      if (save.mods?.length) { this.setMods(save.mods); writeMods(this.mods); }
       const p = new Park(save.snapshot, this.content);
       p.log.splice(0, p.log.length, ...save.log.slice(-MAX_LOG));
       p.hooks = this.hooks();
@@ -190,6 +211,18 @@ export class Game {
     try { localStorage.setItem(BACKUP_KEY, raw); localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
     this.shelved = why;
   }
+}
+
+/** Re-validate mods in order (each against base + the ones before it); drop broken ones and duplicates. */
+function validMods(mods: ModFile[]): ModFile[] {
+  const ok: ModFile[] = [];
+  for (const m of Array.isArray(mods) ? mods.slice(0, 8) : []) {
+    try {
+      const { mod } = validateMod({ name: m?.pack?.name, summary: m?.summary, rideTypes: m?.pack?.rideTypes, items: m?.pack?.items, rules: m?.rules }, buildContent([basePack, ...ok.map((x) => x.pack)]));
+      if (!ok.some((x) => x.pack.id === mod.pack.id)) ok.push(mod);
+    } catch { /* skip a broken mod */ }
+  }
+  return ok;
 }
 
 function readMods(): ModFile[] {
