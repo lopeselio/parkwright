@@ -3,6 +3,7 @@ import { handleParks, type Deps } from './parks.ts';
 import { handleAi } from './ai.ts';
 import type { NearAiClient } from '@parkwright/ai';
 import { handleBridge } from './bridge.ts';
+import { claudeTerminalEnabled, isLocalRequest } from './claude.ts';
 import { LocalRelay, type Relay } from './relay.ts';
 import { serveStatic } from './static.ts';
 
@@ -15,6 +16,12 @@ export function createApp(deps: Deps & { ai?: NearAiClient; relay?: Relay }, opt
       if (path === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler, ai: deps.ai?.model ?? null, bridge: relay.kind }));
+        return;
+      }
+      if (path === '/api/claude/status') {
+        // Only ever true for a local request to a server started with PW_CLAUDE_TERMINAL=1.
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+        res.end(JSON.stringify({ enabled: claudeTerminalEnabled() && isLocalRequest(req) }));
         return;
       }
       if (path.startsWith('/mcp/') || path.startsWith('/api/bridge/')) {
