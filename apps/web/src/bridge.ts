@@ -2,6 +2,7 @@
 // Commands arrive over a WebSocket, run through the same pw parser and validated actions as yours,
 // and are echoed in the terminal so you can watch. The link survives reconnects (deploys, network
 // blips): the tab resumes the same code with a secret kept in sessionStorage.
+import { validateMod } from '@parkwright/content';
 import { runCommand } from '@parkwright/sim';
 import type { Game } from './game.ts';
 import type { ParkTerminal } from './ui/terminal.ts';
@@ -25,6 +26,14 @@ export class Bridge {
 
   private saved(): { code: string; secret: string } | null {
     try { const v = JSON.parse(sessionStorage.getItem(KEY) ?? 'null'); return v?.code && v?.secret ? v : null; } catch { return null; }
+  }
+
+  /** Make sure this tab has a live bridge; returns its code (used by the Claude terminal). */
+  async ensure(): Promise<string | null> {
+    if (this.code) return this.code;
+    if (this.game.visiting) return null;
+    this.wanted = true;
+    return (await this.connect(false)) ? this.code : null;
   }
 
   private async command(arg: string) {
@@ -86,16 +95,38 @@ export class Bridge {
     t.writeln(`${C.dim}then ask Claude: "use the parkwright tools to build me a food court". The link is the only key — don't share it. bridge off revokes it.${C.off}`);
   }
 
+  /** `mod load <json>` (from the mod_apply tool): validate exactly like `mod ai`, then load. */
+  private loadMod(json: string): { ok: boolean; text: string } {
+    let raw: unknown;
+    try { raw = JSON.parse(json); } catch { return { ok: false, text: 'mod is not valid JSON' }; }
+    let v: ReturnType<typeof validateMod>;
+    try { v = validateMod(raw, this.game.content); } catch (e) { return { ok: false, text: (e as Error).message }; }
+    const why = this.game.applyMod(v.mod);
+    if (why) return { ok: false, text: why };
+    const p = v.mod.pack;
+    const lines = [
+      `loaded mod ${p.name} (${p.id})`,
+      ...p.rideTypes.map((t) => `  ride type ${t.id}: ${t.name}, ${t.kind}, cost ${t.cost / 100} cr${t.kind === 'flat' ? `, E${t.ratings.e / 100} I${t.ratings.i / 100} N${t.ratings.n / 100}` : ''}`),
+      ...p.items.map((i) => `  item ${i.id}: ${i.name}`),
+      ...v.mod.rules.map((r) => `  rule on ${r.on}: ${'veto' in r ? 'veto' : `cost ×${r.cost}`}`),
+      ...v.warnings.map((w) => `  note: ${w}`),
+    ];
+    return { ok: true, text: lines.join('\n') };
+  }
+
   private run(id: string, rawCommand: string) {
-    const command = clean(rawCommand).slice(0, 200);
+    const isMod = rawCommand.startsWith('mod load ');
+    // Commands come from an untrusted client: strip control characters; mods get a larger bound.
+    const command = isMod ? rawCommand.slice(0, 20_000) : clean(rawCommand).slice(0, 200);
     let reply: { ok: boolean; text: string };
     if (this.game.visiting) reply = { ok: false, text: "The player is visiting someone else's park right now; their own park will be back when they return." };
+    else if (isMod) reply = this.loadMod(command.slice('mod load '.length));
     else {
       try { const r = runCommand(this.game.park, command); reply = { ok: r.ok, text: r.text }; if (r.focus) this.onFocus(r.focus.x, r.focus.y); }
       catch (e) { reply = { ok: false, text: `the game hit an error running that: ${(e as Error).message}` }; }
     }
     const t = this.term;
-    t.writeln(`\r\n${C.cl}claude ›${C.off} ${C.dim}pw ${command.replace(/^pw\s+/, '')}${C.off}`);
+    t.writeln(`\r\n${C.cl}claude ›${C.off} ${C.dim}${isMod ? 'mod load …' : `pw ${command.replace(/^pw\s+/, '')}`}${C.off}`);
     for (const l of reply.text.split('\n').slice(0, 4)) t.writeln(`  ${reply.ok ? '' : C.err}${clean(l)}${C.off}`);
     this.ws?.send(JSON.stringify({ type: 'result', id, ok: reply.ok, text: reply.text }));
   }
