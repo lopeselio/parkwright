@@ -70,3 +70,15 @@ describe('ride type names', () => {
     expect(findRideType(c, 'zeppelin')).toBeUndefined();
   });
 });
+
+describe('ride place review', () => {
+  it('connects to the network the gate reaches, not to a stray path piece', async () => {
+    const { Park: P, runCommand: run, Routes } = await import('../src/index.ts');
+    const p = P.create(c, 'meadow', 2);
+    p.run('path.place', { x: 10, y: 20, x2: 14, y2: 20 }); // isolated, far from the gate's path
+    const r = run(p, 'ride place carousel --near 12,18');
+    expect(r.ok, r.text).toBe(true);
+    const routes = new Routes(() => p.s);
+    expect(Routes.dist(p.s, routes.toRide(p.s.rides[0]), p.s.gate[0], p.s.gate[1])).toBeGreaterThanOrEqual(0);
+  });
+});
