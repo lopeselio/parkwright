@@ -4,6 +4,8 @@ import { Layered, MemoryCache, RedisCache, type Cache } from './cache.ts';
 import { CosmosStore, FileStore, type Store } from './store.ts';
 import { Settler, type ChainApi } from './settle.ts';
 import { NearAiClient } from '@parkwright/ai';
+import { attachBridge } from './bridge.ts';
+import { LocalRelay, RedisRelay, type Relay } from './relay.ts';
 
 const PORT = Number(process.env.PORT ?? 8790);
 const WEB_DIST = resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname);
@@ -54,7 +56,10 @@ if (settler) {
 }
 // NEAR AI Cloud (TEE): the park manager and mod designer. Off unless the server has an API key.
 const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_KEY, process.env.NEARAI_MODEL ?? 'Qwen/Qwen3.6-35B-A3B-FP8') : undefined;
-const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai }, { webDist: WEB_DIST, version: VERSION });
+// Bridge relay: Redis pub/sub across replicas when hosted, in-process locally.
+const relay: Relay = process.env.REDIS_URL ? await RedisRelay.connect(process.env.REDIS_URL).catch((e) => { console.error('[relay] falling back to local:', e.message); return new LocalRelay(); }) : new LocalRelay();
+const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay }, { webDist: WEB_DIST, version: VERSION });
+attachBridge(server, relay);
 // Don't let slow clients hold connections open (defaults are 300 s / 60 s).
 server.requestTimeout = 30_000;
 server.headersTimeout = 10_000;
