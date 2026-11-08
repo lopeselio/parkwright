@@ -174,22 +174,25 @@ The terminal can also make mods. You describe what you want, an AI writes the mo
 
 ## 9. NEAR (testnet)
 
-Contract `parkwright.testnet` (Rust, near-sdk 5.x):
+Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with admin `parkwright.testnet`.
 
-- **Parks:** `create_park(name) → park_id`, owned by the caller (or a NEAR Auth implicit account).
-- **Venues:** `venue_id = park_id:ride_n`. Their balances are internal NEP-141 credits; the owner calls `withdraw(park_id, amount)`.
-- **Patrons** (agent visitors): sub-accounts `p<n>.parkwright.testnet`. Each one has:
-  - only a function-call key, for `settle_day` and `tip`;
-  - a 0.1 NEAR gas allowance;
-  - a credit budget;
-  - `day_cap`.
-  Patrons sign their own settlements. The server never holds a key that can move another patron's budget.
-- **Settlement:** `settle_day(park_id, day, lines[{venue, amount}], state_hash)`:
-  - it is signed by the patron;
-  - the contract checks `day > last_day[patron][park]` (no replay) and `Σ ≤ day_cap`, then moves the credits;
-  - `state_hash` commits to the simulation state, so anyone can replay the day from the published action log and check it.
-- **Contractor agents** (agent economy): an AI contractor bids to build a coaster to a brief (budget, minimum excitement). The player accepts a bid and pays into escrow, and the contract releases payment after the server's test-run result matches the brief.
-- **Indexing:** contract events (`nep297`) are read by the server and cached in Redis, so the UI never polls RPC directly.
+- **Credits:** an NEP-141 token, symbol `CR`, 2 decimals. 1 credit = 100 units = 100 in-game cents. It implements `ft_transfer`, `ft_balance_of`, `ft_total_supply` and `ft_metadata`. Transfers only go to accounts that already hold credits, own a park, or are patrons; that keeps storage bounded without storage deposits.
+- **Parks:** `register_park(park_id, name, owner?)`. The server registers each cloud park on its first publish, owned by the admin until a player claims it with `transfer_park`. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
+- **Patrons** (agent visitors): `p0`–`p7.parkwright.testnet`, one per visitor group in the sim.
+  - Each patron's only key is a function-call key for `settle_day` on the contract. It has no full-access key, so it can't move NEAR or call anything else.
+  - The admin sets each patron's `day_cap` (1,000 CR per park-day) and mints its budget (`fund_patrons`, 20,000 CR, topped up automatically below 5,000 CR).
+- **Settlement:** `settle_day(park_id, day, lines[{venue, amount}], state_hash)` is signed by the patron itself. The contract:
+  - requires `day` > the last day this patron settled for this park, so a day can't be paid twice and retries are safe;
+  - requires the sum ≤ `day_cap` and ≤ the patron's balance;
+  - moves the credits into the park's escrow, adds them to per-venue totals, and emits a `parkwright/settle` event.
+  - `state_hash` is a sha256 of that day's stats, so the claim can be audited.
+- **The game server's admin key** is a function-call key on `parkwright.testnet`, limited to `register_park`, `set_patron` and `fund_patrons`.
+- **Invariant:** credits in accounts plus park escrow always equal `ft_total_supply`. The contract tests check this, and the `audit` view exposes it.
+- **Worker:** `apps/server/src/settle.ts`. After each cloud save, the park is marked dirty. One replica at a time (holding a Redis lock) settles its finished days: one `settle_day` per visitor group per day.
+  - If a day's total is over the cap, the agent pays at most the cap, scaled evenly across venues.
+  - "Already settled" counts as success.
+- **Trust note:** the day's spend comes from the client's save, which the sim produced in the browser. The caps bound what any one park-day can draw from a patron. Full verification means replaying the action log from the start.
+- **Later:** contractor agents that bid to build coasters, paid from escrow; players claiming parks with NEAR Auth.
 
 ## 10. Architecture
 
