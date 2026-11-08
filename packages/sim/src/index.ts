@@ -6,3 +6,4 @@ export * from './actions.ts';
 export * from './park.ts';
 export { refusal, PATRON_GROUPS } from './visitors.ts';
 export * from './cli.ts';
+export * from './coaster.ts';
