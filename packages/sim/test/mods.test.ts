@@ -25,10 +25,10 @@ describe('mods', () => {
     const ids = mod.pack.rideTypes.map((t) => t.id);
     expect(ids).toEqual(['mod-spooky-nights--phantom-drop', 'mod-spooky-nights--cocoa-cart', 'mod-spooky-nights--evil']);
     const evil = mod.pack.rideTypes[2];
-    expect(evil.cost).toBe(5000);
+    expect(evil.cost).toBe(600_000); // excitement 10.00 costs at least 6,000 cr
     expect(evil.ratings).toEqual({ e: 1000, i: 0, n: 100 });
     expect(evil.size).toEqual([4, 1]);
-    expect(evil.capacity).toBe(40);
+    expect(evil.capacity).toBe(30); // ≤ 1 rider per 12 ticks of its 360-tick cycle
     expect(evil.model).toBe('carousel');
     expect(mod.pack.items[0].effect.happy).toBe(255);
     expect(mod.pack.rideTypes[1].item).toBe('mod-spooky-nights--hot-cocoa');
@@ -61,5 +61,28 @@ describe('mods', () => {
     const cash = p.s.cash;
     expect(p.run('ride.build', { type: 'mod-spooky-nights--cocoa-cart', x: 30, y: 30 }).ok).toBe(true);
     expect(cash - p.s.cash).toBe(11000); // half of 22000
+  });
+
+  it('review: rules apply whether a ride is named by id or by display name', () => {
+    const { mod } = validateMod({ name: 'No Spin', rules: [{ on: 'ride.build', when: { type: 'carousel' }, veto: 'no spinning' }] }, baseContent);
+    const p = Park.create(buildContent([basePack, mod.pack]), 'sandbox', 1);
+    p.hooks.push(...rulesToHooks(mod.pack.id, mod.rules));
+    for (const t of ['carousel', 'Carousel', 'Brass Carousel', 'brass_carousel']) expect(p.run('ride.build', { type: t, x: 10, y: 10 }).ok, t).toBe(false);
+  });
+
+  it('review: logs the resolved ride id, so replays never depend on loaded mods', () => {
+    const p = Park.create(baseContent, 'sandbox', 1);
+    p.run('ride.build', { type: 'swing', x: 10, y: 10 });
+    expect(p.log[0].params.type).toBe('swings');
+  });
+
+  it('review: ids are always slugged and packs cannot collide', () => {
+    const evil = 'mod-x--' + 'a'.repeat(5000) + '<script>\u001b]0;pwn\u0007';
+    const { mod } = validateMod({ name: 'X', rideTypes: [{ id: evil, name: 'N\u009b31m', kind: 'flat' }] }, baseContent);
+    expect(mod.pack.rideTypes[0].id).toMatch(/^mod-x--[a-z0-9-]{1,24}$/);
+    expect(mod.pack.rideTypes[0].name).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    const a = validateMod({ name: 'Spooky--Fun', rideTypes: [{ id: 'carousel', kind: 'flat' }] }, baseContent).mod;
+    const b = validateMod({ name: 'Spooky', rideTypes: [{ id: 'fun--carousel', kind: 'flat' }] }, baseContent).mod;
+    expect(a.pack.rideTypes[0].id).not.toBe(b.pack.rideTypes[0].id);
   });
 });
