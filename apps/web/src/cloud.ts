@@ -107,6 +107,13 @@ export class Cloud {
     return this.game.goHome();
   }
 
+  /** Your park's state on NEAR (escrow, earnings, settlements), if settlement is on. */
+  async chain(): Promise<{ enabled: boolean; contract?: string; park?: { owner: string; balance: string; earned: string; settlements: number } | null } | null> {
+    if (!this.link) return null;
+    const res = await fetch(`/api/parks/${this.link.id}/chain`).catch(() => null);
+    return res?.ok ? res.json() : null;
+  }
+
   async leaderboard(): Promise<{ id: string; name: string; rating: number; value: number; visitors: number; day: number }[]> {
     const res = await fetch('/api/leaderboard');
     if (!res.ok) return [];
