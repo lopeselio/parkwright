@@ -134,4 +134,10 @@ describe('park bridge', () => {
     await client.close();
     ws.close();
   });
+
+  it('review: with the Claude terminal off, /ws/claude is refused (never left hanging)', async () => {
+    const ws = new WebSocket(base.replace('http', 'ws') + '/ws/claude');
+    const outcome = await new Promise((r) => { ws.on('open', () => r('open')); ws.on('error', () => r('refused')); setTimeout(() => r('hung'), 3000); });
+    expect(outcome).toBe('refused');
+  });
 });
