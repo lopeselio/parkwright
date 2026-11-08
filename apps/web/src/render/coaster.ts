@@ -1,0 +1,151 @@
+// Coaster track + train, generated from the sim's own path so what you see is what the test run measured.
+import * as THREE from 'three';
+import { TILE_M, PIECES, endPose, isClosed, testRun, trackPath, type Ride, type TestRun } from '@parkwright/sim';
+import { mat } from './models.ts';
+
+/** Sim metres → render units (1 unit = 1 tile). */
+const M = 1 / TILE_M;
+const GAUGE = 0.11;
+const CARS = 3;
+const CAR_GAP = 0.32; // units between car centres along the track
+
+export interface CoasterView {
+  group: THREE.Group;
+  animate: (t: number, running: boolean) => void;
+}
+
+function toVec(p: { x: number; y: number; z: number }) {
+  return new THREE.Vector3(p.x * M, p.y * M + 0.12, p.z * M);
+}
+
+/** Intensity colour: calm wood → hot red where the forces are high. */
+function forceColour(vert: number, lat: number) {
+  const k = Math.min(1, Math.max(0, (Math.max(vert - 1, 0) / 2.5 + Math.abs(lat) / 2 + Math.max(0, -vert) / 0.8) / 1.2));
+  return new THREE.Color().setHSL(0.08 - 0.08 * k, 0.55 + 0.3 * k, 0.42);
+}
+
+export function buildCoaster(ride: Ride): CoasterView {
+  const g = new THREE.Group();
+  const track = ride.track ?? [];
+  const pts = trackPath(track);
+  if (pts.length < 2) return { group: g, animate: () => {} };
+  const closed = isClosed(track);
+  const run: TestRun | null = closed ? testRun(track) : null;
+  const vecs = pts.map(toVec);
+
+  // Frame along the path: tangent + horizontal right vector (rails sit either side).
+  const right: THREE.Vector3[] = vecs.map((v, i) => {
+    const a = vecs[Math.max(0, i - 1)], b = vecs[Math.min(vecs.length - 1, i + 1)];
+    const t = new THREE.Vector3().subVectors(b, a).setY(0).normalize();
+    return new THREE.Vector3(-t.z, 0, t.x);
+  });
+
+  const curveOf = (side: number) => new THREE.CatmullRomCurve3(vecs.map((v, i) => v.clone().addScaledVector(right[i], side * GAUGE)), closed, 'centripetal');
+  const railMat = mat('#c9c2b0', { metalness: 0.5, roughness: 0.35 });
+  const segs = Math.max(16, pts.length * 2);
+  for (const side of [-1, 1]) {
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curveOf(side), segs, 0.028, 6, closed), railMat);
+    tube.castShadow = true;
+    g.add(tube);
+  }
+
+  // Ties (sleepers), coloured by the forces measured in the test run.
+  const tieGeo = new THREE.BoxGeometry(GAUGE * 2.6, 0.03, 0.06);
+  const ties = new THREE.InstancedMesh(tieGeo, new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), pts.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  pts.forEach((p, i) => {
+    const v = vecs[i];
+    const nxt = vecs[(i + 1) % vecs.length];
+    const ang = Math.atan2(nxt.x - v.x, nxt.z - v.z);
+    const bank = p.bank * 0.7;
+    q.setFromEuler(new THREE.Euler(0, ang, -bank, 'YXZ'));
+    m4.compose(v.clone().setY(v.y - 0.03), q, new THREE.Vector3(1, 1, 1));
+    ties.setMatrixAt(i, m4);
+    const def = PIECES[track[p.piece].piece];
+    const c = def.lift ? new THREE.Color('#5a5f66') : def.brakes ? new THREE.Color('#d0a020') : def.station ? new THREE.Color('#8a6a4a') : run?.vert ? forceColour(run.vert[i], run.lat![i]) : new THREE.Color('#9a7048');
+    ties.setColorAt(i, c);
+  });
+  ties.castShadow = true;
+  g.add(ties);
+
+  // Timber supports down to the ground every few samples.
+  const postGeo = new THREE.BoxGeometry(0.05, 1, 0.05);
+  const posts: THREE.Matrix4[] = [];
+  for (let i = 0; i < pts.length; i += 4) {
+    const v = vecs[i];
+    if (v.y < 0.2) continue;
+    for (const side of [-1, 1]) {
+      const base = v.clone().addScaledVector(right[i], side * GAUGE * 1.4);
+      posts.push(new THREE.Matrix4().compose(new THREE.Vector3(base.x, (v.y - 0.04) / 2, base.z), new THREE.Quaternion(), new THREE.Vector3(1, v.y - 0.04, 1)));
+    }
+  }
+  const postMesh = new THREE.InstancedMesh(postGeo, mat('#7a5638'), Math.max(1, posts.length));
+  posts.forEach((p, i) => postMesh.setMatrixAt(i, p));
+  postMesh.count = posts.length;
+  postMesh.castShadow = true;
+  g.add(postMesh);
+
+  // Station platform.
+  for (const tp of track.filter((t) => PIECES[t.piece].station)) {
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.1, 0.98), mat('#b8a07c'));
+    plat.position.set(tp.x + 0.5, 0.05, tp.y + 0.5);
+    plat.receiveShadow = true;
+    g.add(plat);
+  }
+
+  // Open end marker while building.
+  if (!closed) {
+    const e = endPose(track);
+    if (e) {
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.35, 8), mat('#f2b84b', { emissive: '#f2b84b', emissiveIntensity: 0.4 }));
+      arrow.position.set(e.x + 0.5, e.z * 0.5 + 0.35, e.y + 0.5);
+      arrow.rotation.z = Math.PI;
+      g.add(arrow);
+    }
+  }
+
+  // Train: cars follow the test-run speed profile.
+  const cars: THREE.Group[] = [];
+  const carCols = ['#c0533a', '#f2b84b', '#5fb6e8'];
+  for (let i = 0; i < CARS; i++) {
+    const car = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.26), mat(carCols[i % 3]));
+    body.position.y = 0.06;
+    body.castShadow = true;
+    car.add(body);
+    g.add(car);
+    cars.push(car);
+  }
+  const curve = new THREE.CatmullRomCurve3(vecs, closed, 'centripetal');
+  const total = run?.s ? run.s[run.s.length - 1] : 1;
+  const sAt = (sec: number) => {
+    if (!run?.t || !run.s) return 0;
+    const tt = run.t;
+    if (sec <= 0) return 0;
+    if (sec >= tt[tt.length - 1]) return total;
+    let lo = 0, hi = tt.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (tt[mid] <= sec) lo = mid; else hi = mid; }
+    const f = (sec - tt[lo]) / (tt[hi] - tt[lo] || 1);
+    return run.s[lo] + (run.s[hi] - run.s[lo]) * f;
+  };
+  const place = (sMetres: number) => {
+    cars.forEach((car, i) => {
+      let u = (sMetres / total) - (i * CAR_GAP) / (total * M);
+      u = ((u % 1) + 1) % 1;
+      const p = curve.getPointAt(u);
+      const tan = curve.getTangentAt(u);
+      car.position.copy(p);
+      car.lookAt(p.clone().add(tan));
+    });
+  };
+  place(0);
+  let started = -1;
+  const animate = (t: number, running: boolean) => {
+    if (!run?.ok) return;
+    if (!running) { started = -1; place(0); return; }
+    if (started < 0) started = t;
+    const sec = (t - started) % (run.t![run.t!.length - 1] + 2);
+    place(sAt(sec));
+  };
+  return { group: g, animate };
+}
