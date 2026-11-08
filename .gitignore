@@ -9,3 +9,4 @@ target/
 coverage/
 saves/
 assets/blender/*.blend1
+mods/workspace/

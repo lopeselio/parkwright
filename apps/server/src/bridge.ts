@@ -16,6 +16,8 @@ const CODE_RE = /^[a-z2-7]{26}$/;
 /** The tab gets 15 s; whoever waits for the relay gets a little longer, so the tab's own timeout reply arrives. */
 const TIMEOUT_MS = 15_000;
 const WAIT_MS = TIMEOUT_MS + 2_000;
+/** Mods travel as a command too, so they get a bigger (but still bounded) size limit. */
+const MOD_MAX = 20_000;
 const PER_MIN = 90;
 const newCode = () => {
   // RFC 4648 base32, lowercase: 26 chars ≈ 128 bits.
@@ -42,7 +44,9 @@ export function attachBridge(server: Server, relay: Relay, cache: Cache) {
   const perIp = new Map<string, number>();
   let total = 0;
   server.on('upgrade', (req, socket, head) => {
-    if ((req.url ?? '').split('?')[0] !== '/ws/bridge' || !sameOrigin(req)) { socket.destroy(); return; }
+    const p = (req.url ?? '').split('?')[0];
+    if (p === '/ws/claude') return; // handled by the (local-only) Claude terminal
+    if (p !== '/ws/bridge' || !sameOrigin(req)) { socket.destroy(); return; }
     const ip = clientIp(req);
     if (total >= MAX_SOCKETS || (perIp.get(ip) ?? 0) >= MAX_PER_IP) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -122,6 +126,15 @@ function mcpFor(code: string, relay: Relay) {
     description: 'Run one Parkwright terminal command against the park open in the player\'s browser, e.g. "help", "park", "map 24 38 --r 9", "ride list", "ride place carousel", "path place 24 30 24 40", "coaster start 10 10 --dir 1", "finance". Every command is validated by the game; errors explain what to fix.',
     inputSchema: { command: z.string().min(1).max(200).describe('The command, with or without the leading "pw"') },
   }, async ({ command }) => run(command));
+  mcp.registerTool('mod_apply', {
+    title: 'Load a mod',
+    description: 'Validate a Parkwright mod (data only: rideTypes, items, rules — same schema as `mod ai`) and load it into the player\'s park. The game clamps numbers and namespaces ids; the reply lists what loaded and any warnings. Build with the new types using pw ("ride types" shows their ids).',
+    inputSchema: { mod: z.record(z.string(), z.unknown()).describe('The mod JSON object: {name, summary, rideTypes, items, rules}') },
+  }, async ({ mod }) => {
+    const json = JSON.stringify(mod);
+    if (json.length > MOD_MAX) return { content: [{ type: 'text' as const, text: `mod is too large (${json.length} chars, max ${MOD_MAX})` }], isError: true };
+    return run(`mod load ${json}`);
+  });
   mcp.registerTool('park_overview', {
     title: 'Park overview',
     description: 'Status, rides, finances and what visitors are thinking — a good first call.',
