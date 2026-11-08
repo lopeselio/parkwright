@@ -10,8 +10,8 @@ LOC=${LOC:-northeurope}
 APP=${APP:-parkwright}
 COSMOS=${COSMOS:-parkwright-db}
 REDIS=${REDIS:-parkwright-redis}
-# North Europe often has no Cosmos/Redis capacity; West Europe is the default for data.
-COSMOS_LOC=${COSMOS_LOC:-westeurope}
+# North and West Europe had no Cosmos capacity for this subscription (Nov 2026); Sweden Central did.
+COSMOS_LOC=${COSMOS_LOC:-swedencentral}
 REDIS_LOC=${REDIS_LOC:-westeurope}
 IDENTITY=${IDENTITY:-parkwright-data}
 
@@ -27,9 +27,14 @@ ID_PRINCIPAL=$(az identity show -g "$RG" -n "$IDENTITY" --query principalId -o t
 ID_CLIENT=$(az identity show -g "$RG" -n "$IDENTITY" --query clientId -o tsv)
 
 # --- Cosmos DB (serverless)
-# A capacity error can leave an account in the Failed state; remove it so it can be recreated.
+# A capacity error can leave an account in the Failed state. Deleting is irreversible, so it needs DELETE_FAILED=1.
 if [ "$(az cosmosdb show -g "$RG" -n "$COSMOS" --query provisioningState -o tsv 2>/dev/null)" = "Failed" ]; then
-  az cosmosdb delete -g "$RG" -n "$COSMOS" --yes -o none
+  if [ "${DELETE_FAILED:-}" = 1 ]; then
+    az cosmosdb delete -g "$RG" -n "$COSMOS" --yes -o none
+  else
+    echo "Cosmos account $COSMOS is in the Failed state. Re-run with DELETE_FAILED=1 to delete and recreate it (or pick another COSMOS name)." >&2
+    exit 1
+  fi
 fi
 if ! az cosmosdb show -g "$RG" -n "$COSMOS" -o none 2>/dev/null; then
   az cosmosdb create -g "$RG" -n "$COSMOS" --capabilities EnableServerless \
@@ -40,10 +45,10 @@ az cosmosdb sql database show -g "$RG" -a "$COSMOS" -n parkwright -o none 2>/dev
   || az cosmosdb sql database create -g "$RG" -a "$COSMOS" -n parkwright -o none
 az cosmosdb sql container show -g "$RG" -a "$COSMOS" -d parkwright -n parks -o none 2>/dev/null \
   || az cosmosdb sql container create -g "$RG" -a "$COSMOS" -d parkwright -n parks --partition-key-path /id -o none
-# Built-in "Cosmos DB Data Contributor" for the app identity.
+# Built-in "Cosmos DB Data Contributor" for the app identity, scoped to the parkwright database only.
 COSMOS_ID=$(az cosmosdb show -g "$RG" -n "$COSMOS" --query id -o tsv)
 if [ -z "$(az cosmosdb sql role assignment list -g "$RG" -a "$COSMOS" --query "[?principalId=='$ID_PRINCIPAL'].id" -o tsv)" ]; then
-  az cosmosdb sql role assignment create -g "$RG" -a "$COSMOS" --scope "$COSMOS_ID" \
+  az cosmosdb sql role assignment create -g "$RG" -a "$COSMOS" --scope "$COSMOS_ID/dbs/parkwright" \
     --principal-id "$ID_PRINCIPAL" --role-definition-id 00000000-0000-0000-0000-000000000002 -o none
 fi
 COSMOS_ENDPOINT=$(az cosmosdb show -g "$RG" -n "$COSMOS" --query documentEndpoint -o tsv)
