@@ -72,7 +72,7 @@ function queueTiles(s: ParkState, r: Ride): number {
   let e = queueCache.get(s);
   if (!e || e.version !== s.mapVersion) { e = { version: s.mapVersion, tiles: new Map() }; queueCache.set(s, e); }
   // Key on the entrance too: it's what the chain grows from.
-  const key = r.id * 65536 + r.ey * 256 + r.ex;
+  const key = r.id * 1_000_000 + r.ey * 1000 + r.ex; // maps are well under 1000 tiles a side
   let n = e.tiles.get(key);
   if (n === undefined) { n = queueChain(s, r).length; e.tiles.set(key, n); }
   return n;
