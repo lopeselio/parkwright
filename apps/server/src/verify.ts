@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { basePack, buildContent, validateMod, type ModFile } from '@parkwright/content';
-import { computeRating, Park, parkValue, rulesToHooks, type ActionRecord, type DayStats, type ParkState } from '@parkwright/sim';
+import { computeRating, Park, parkValue, rulesOf, rulesToHooks, type ActionRecord, type DayStats, type ParkState } from '@parkwright/sim';
 import type { Cache } from './cache.ts';
 
 /** What the replay produced: the only numbers settlement and the leaderboard ever use. */
@@ -54,7 +54,8 @@ export function verifySave(save: any, maxDays = 400): VerifyResult {
   const content = buildContent([basePack, ...mods.map((m) => m.pack)]);
   const hooks = mods.flatMap((m) => rulesToHooks(m.pack.id, m.rules));
   let replayed: Park;
-  try { replayed = Park.replay(content, s.scenario, s.seed, log, s.tick, s.name, hooks); }
+  // Replay on the park's own rules version: saves from before versioning have none and are v1.
+  try { replayed = Park.replay(content, s.scenario, s.seed, log, s.tick, s.name, hooks, rulesOf(s)); }
   catch (e) { return done(false, `replay failed: ${(e as Error).message}`); }
   // `mods` is metadata (which packs were loaded at creation); everything else must match byte for byte.
   replayed.s.mods = s.mods;

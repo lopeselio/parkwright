@@ -6,18 +6,20 @@ import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
 import { payUpkeep, updateRide, wearRide } from './rides.ts';
 import { updateStaff } from './staff.ts';
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, RULES, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
 import { spawnVisitor, updateVisitor } from './visitors.ts';
 
 const beauty = (id: number) => SCENERY[id]?.beauty ?? 0;
 const freshDay = (day: number): DayStats => ({ day, visitors: 0, arrivals: 0, rating: 0, income: 0, rideIncome: 0, costs: 0, spend: {} });
 
-export function newState(c: Content, scenarioId: string, seed: number, name = 'My Park'): ParkState {
+export function newState(c: Content, scenarioId: string, seed: number, name = 'My Park', rules = RULES): ParkState {
   const sc = c.scenarios[scenarioId];
   if (!sc) throw new Error(`unknown scenario ${scenarioId}; have ${Object.keys(c.scenarios).join(', ')}`);
+  if (!Number.isInteger(rules) || rules < 1 || rules > RULES) throw new Error(`unknown rules version ${rules}; this sim knows 1–${RULES}`);
   const [w, h] = sc.size;
   const s: ParkState = {
-    version: 1, name, scenario: sc.id, seed, rng: seedRng(seed), tick: 0, day: 0, w, h,
+    // v1 parks carry no `rules` field at all, so their JSON (and hash) is exactly what it always was.
+    version: 1, ...(rules > 1 ? { rules } : {}), name, scenario: sc.id, seed, rng: seedRng(seed), tick: 0, day: 0, w, h,
     tiles: new Array(w * h).fill(Tile.Grass), occ: new Array(w * h).fill(0), litter: new Array(w * h).fill(0),
     bins: new Array(w * h).fill(0), scenery: new Array(w * h).fill(0),
     gate: [sc.gate[0], sc.gate[1]], cash: sc.cash + sc.loan, loan: sc.loan, maxLoan: sc.maxLoan, interestBp: sc.interestBp,
@@ -57,13 +59,17 @@ export class Park {
     this.routes = new Routes(() => this.s);
   }
 
-  static create(c: Content, scenario: string, seed: number, name?: string) {
-    return new Park(newState(c, scenario, seed, name), c);
+  /** A new park on the given rules version (default: the latest). */
+  static create(c: Content, scenario: string, seed: number, name?: string, rules = RULES) {
+    return new Park(newState(c, scenario, seed, name, rules), c);
   }
 
-  /** Rebuild from scratch by replaying an action log. */
-  static replay(c: Content, scenario: string, seed: number, log: ActionRecord[], untilTick: number, name?: string, hooks: Hook[] = []) {
-    const p = Park.create(c, scenario, seed, name);
+  /**
+   * Rebuild from scratch by replaying an action log. Pass the park's own rules version
+   * (`rulesOf(snapshot)`) — a v1 park replayed on newer rules plays out differently.
+   */
+  static replay(c: Content, scenario: string, seed: number, log: ActionRecord[], untilTick: number, name?: string, hooks: Hook[] = [], rules = RULES) {
+    const p = Park.create(c, scenario, seed, name, rules);
     p.hooks = hooks;
     const sorted = [...log].sort((a, b) => a.tick - b.tick);
     for (const rec of sorted) {

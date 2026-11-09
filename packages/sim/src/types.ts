@@ -168,8 +168,20 @@ export interface DayStats {
   spend: Record<string, Record<string, number>>;
 }
 
+/**
+ * Sim rules version. Published parks are verified by replaying their action log, so a rule change must
+ * never alter how an existing park plays out: every behavioural change is gated on the park's own
+ * rules version, and new parks start on the latest one.
+ *   1 — the original rules (saves from before versioning have no `rules` field and are v1).
+ *   2 — balance pass for big crowds (hundreds to ~1500 visitors).
+ */
+export const RULES = 2;
+export const rulesOf = (s: Pick<ParkState, 'rules'>): number => s.rules ?? 1;
+
 export interface ParkState {
   version: 1;
+  /** Sim rules version (see RULES). Absent on v1 parks, so their state — and hash — is unchanged. */
+  rules?: number;
   name: string;
   scenario: string;
   seed: number;

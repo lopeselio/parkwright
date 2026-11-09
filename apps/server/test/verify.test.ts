@@ -10,8 +10,8 @@ import { Layered, MemoryCache } from '../src/cache.ts';
 import { FileStore } from '../src/store.ts';
 import { Verifier, verifySave } from '../src/verify.ts';
 
-function played(days = 3, seed = 5) {
-  const p = Park.create(baseContent, 'meadow', seed, 'Honest Park');
+function played(days = 3, seed = 5, rules?: number) {
+  const p = Park.create(baseContent, 'meadow', seed, 'Honest Park', rules);
   for (const t of ['carousel', 'pretzel-cart', 'lemonade-stand']) runCommand(p, `ride place ${t}`);
   p.run('park.fee', { fee: 5 });
   p.advanceTo(TICKS_PER_DAY * days + 30);
@@ -23,6 +23,15 @@ describe('verify by replay', () => {
     const { save } = played();
     const r = verifySave(save);
     expect(r).toMatchObject({ ok: true });
+  });
+
+  it('a park on the old (v1) rules still verifies; an unknown rules version does not', () => {
+    const { save } = played(3, 5, 1);
+    expect(save.snapshot.rules).toBeUndefined();
+    expect(verifySave(save)).toMatchObject({ ok: true });
+    const current = played(3, 5).save;
+    expect(verifySave(current)).toMatchObject({ ok: true });
+    expect(verifySave({ ...current, snapshot: { ...current.snapshot, rules: 99 } }).ok).toBe(false);
   });
 
   it('inflated spend, a dropped action, or a partial log do not verify', () => {
