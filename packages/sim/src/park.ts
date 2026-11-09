@@ -48,6 +48,10 @@ export class Park {
   readonly log: ActionRecord[] = [];
   hooks: Hook[] = [];
   private listeners: ((e: ParkEvent) => void)[] = [];
+  /** id → visitor for s.visitors. Derived from the state only (rebuilt when the array is replaced, extended as it grows). */
+  private byId = new Map<number, Visitor>();
+  private byIdOf: Visitor[] | null = null;
+  private byIdLen = 0;
 
   constructor(public s: ParkState, public c: Content) {
     this.routes = new Routes(() => this.s);
@@ -155,12 +159,20 @@ export class Park {
     s.tick++;
     const rate = arrivalRate(s, c);
     if (chance(s.rng, Math.round(rate * 100), TICKS_PER_DAY * 100)) spawnVisitor(s, c);
-    const byId = new Map<number, Visitor>();
-    for (const v of s.visitors) byId.set(v.id, v);
     for (const v of s.visitors) updateVisitor(s, c, this.routes, v);
+    const byId = this.visitorIndex();
     for (const r of s.rides) updateRide(s, c, r, byId);
     updateStaff(s, c, this.routes);
     if (s.tick % TICKS_PER_DAY === 0) this.endDay();
+  }
+
+  /** The visitor index, kept in step with s.visitors without rebuilding it every tick. */
+  private visitorIndex(): Map<number, Visitor> {
+    const vs = this.s.visitors;
+    if (vs !== this.byIdOf || vs.length < this.byIdLen) { this.byId.clear(); this.byIdOf = vs; this.byIdLen = 0; }
+    for (let i = this.byIdLen; i < vs.length; i++) this.byId.set(vs[i].id, vs[i]);
+    this.byIdLen = vs.length;
+    return this.byId;
   }
 
   private endDay() {
