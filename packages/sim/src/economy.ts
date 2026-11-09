@@ -69,6 +69,7 @@ export function parkValue(s: ParkState, c: Content): number {
 
 /** Park rating 0–1000, recomputed daily. */
 export function computeRating(s: ParkState, c: Content): number {
+  const v2 = rulesOf(s) >= 2;
   const here = s.visitors.filter((v) => v.mode !== 'gone');
   const n = here.length;
   let r = 300;
@@ -76,7 +77,8 @@ export function computeRating(s: ParkState, c: Content): number {
     const happy = here.filter((v) => v.happy > 128).length;
     r += Math.floor((300 * happy) / n);
     const lost = here.filter((v) => v.lostTicks > 600).length;
-    r -= Math.max(0, lost - 10) * 5;
+    // v2: a few lost visitors are forgiven per 50 in the park, so a big crowd isn't penalised for its size.
+    r -= Math.max(0, lost - 10 - (v2 ? Math.floor(n / 50) : 0)) * 5;
   } else {
     r += 150;
   }
@@ -92,7 +94,12 @@ export function computeRating(s: ParkState, c: Content): number {
   }
   let litter = 0;
   for (const l of s.litter) litter += l;
-  r -= Math.min(250, litter * 3);
+  if (v2) {
+    // v2: litter counts by density — 1 piece per path tile costs 300 — so a big park isn't judged by its size.
+    let paths = 0;
+    for (const t of s.tiles) if (t !== 0) paths++;
+    r -= Math.min(250, Math.floor((litter * 300) / Math.max(100, paths)));
+  } else r -= Math.min(250, litter * 3);
   r -= Math.min(300, s.incidents);
   return Math.max(0, Math.min(1000, r));
 }
