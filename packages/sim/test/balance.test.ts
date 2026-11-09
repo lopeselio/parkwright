@@ -60,3 +60,17 @@ describe(`balance (rules v${RULES})`, () => {
     expect(Math.min(...small.slice(0, 7).map((d) => d.day.visitors))).toBeGreaterThan(20);
   });
 });
+
+describe('goals follow the rules version', () => {
+  it('v1 meadow parks keep the 120-visitor goal; v2 parks aim for 1,000', async () => {
+    const { baseContent } = await import('@parkwright/content');
+    const { Park, runCommand, objectiveOf, rulesOf } = await import('../src/index.ts');
+    const v1 = Park.create(baseContent, 'meadow', 3, 'Old', 1);
+    const v2 = Park.create(baseContent, 'meadow', 3, 'New');
+    const sc = baseContent.scenarios.meadow;
+    expect(objectiveOf(sc, rulesOf(v1.s))).toMatchObject({ count: 120, minRating: 600 });
+    expect(objectiveOf(sc, rulesOf(v2.s))).toMatchObject({ count: 1000, minRating: 650 });
+    expect(runCommand(v1, 'park').text).toMatch(/Goal: 120 visitors/);
+    expect(runCommand(v2, 'park').text).toMatch(/Goal: 1,000 visitors/);
+  });
+});
