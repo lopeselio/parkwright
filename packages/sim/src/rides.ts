@@ -1,5 +1,5 @@
 import type { Content } from '@parkwright/content';
-import { book } from './economy.ts';
+import { book, weeklyUpkeep } from './economy.ts';
 import { ejectQueue } from './actions.ts';
 import { chance, randInt } from './rng.ts';
 import { finishRide, leaveRide, pay, think } from './visitors.ts';
@@ -94,5 +94,5 @@ export function inspectRide(s: ParkState, r: Ride) {
 
 /** Upkeep is charged daily (1/7 of the weekly figure), so a ride built and removed inside a week still pays. */
 export function payUpkeep(s: ParkState, c: Content) {
-  for (const r of s.rides) book(s, 'upkeep', -Math.round(c.rideTypes[r.type].upkeep / 7));
+  for (const r of s.rides) book(s, 'upkeep', -Math.round(weeklyUpkeep(s, c, r.type) / 7));
 }

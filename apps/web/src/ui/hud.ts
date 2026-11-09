@@ -1,4 +1,4 @@
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, PIECES, SCENERY, endPose, findRide, isClosed, queueCapacity, valueForMoney, type Dir } from '@parkwright/sim';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, PIECES, SCENERY, endPose, findRide, isClosed, queueCapacity, valueForMoney, weeklyWage, type Dir } from '@parkwright/sim';
 import type { Game } from '../game.ts';
 import type { Tools } from './tools.ts';
 import type { Cloud } from '../cloud.ts';
@@ -308,7 +308,7 @@ export class Hud {
       side.classList.add('open');
       side.replaceChildren(
         h('header', {}, h('h2', {}, 'Staff'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
-        h('div', { class: 'row wrap' }, ...(Object.values(c.staff)).map((st) => h('button', { onclick: () => { const r = this.game.run('staff.hire', { role: st.role }); toast(r.ok ? r.message ?? 'hired' : r.error, r.ok ? 'ok' : 'err'); this.renderSide(); } }, `Hire ${st.name} · ${cr(st.wage)}/wk`))),
+        h('div', { class: 'row wrap' }, ...(Object.values(c.staff)).map((st) => h('button', { onclick: () => { const r = this.game.run('staff.hire', { role: st.role }); toast(r.ok ? r.message ?? 'hired' : r.error, r.ok ? 'ok' : 'err'); this.renderSide(); } }, `Hire ${st.name} · ${cr(weeklyWage(s, c, st.role))}/wk`))),
         h('p', { class: 'muted' }, 'Handymen sweep litter. Mechanics fix breakdowns and inspect rides. Entertainers cheer up nearby visitors.'),
         ...s.staff.map((st) => h('div', { class: 'staff' }, h('b', {}, st.name), h('span', {}, st.task !== null ? ` → ${findRide(s, st.task)?.name ?? ''}` : ''), h('button', { class: 'small', onclick: () => { this.game.run('staff.fire', { staff: st.id }); this.renderSide(); } }, 'Fire'))),
       );

@@ -1,4 +1,4 @@
-import type { Content, Ratings } from '@parkwright/content';
+import type { Content, Ratings, StaffRole } from '@parkwright/content';
 import { DAYS_PER_SEASON, rulesOf, type Ledger, type LedgerCategory, type ParkState, type Ride } from './types.ts';
 
 export const emptyLedger = (): Ledger => ({
@@ -102,6 +102,23 @@ export function computeRating(s: ParkState, c: Content): number {
   } else r -= Math.min(250, litter * 3);
   r -= Math.min(300, s.incidents);
   return Math.max(0, Math.min(1000, r));
+}
+
+/**
+ * Running costs. Rules v2 multiplies wages and upkeep, so a park's costs grow with the staff and rides a
+ * big crowd needs instead of vanishing next to its takings.
+ */
+export const WAGES_V2 = 4;
+export const UPKEEP_V2 = 3;
+
+/** What a staff member costs per week, in cents, on this park's rules. */
+export function weeklyWage(s: ParkState, c: Content, role: StaffRole): number {
+  return c.staff[role].wage * (rulesOf(s) >= 2 ? WAGES_V2 : 1);
+}
+
+/** What a ride, stall or facility costs to run per week, in cents, on this park's rules. */
+export function weeklyUpkeep(s: ParkState, c: Content, type: string): number {
+  return c.rideTypes[type].upkeep * (rulesOf(s) >= 2 ? UPKEEP_V2 : 1);
 }
 
 /** Rules v2: each this many points of ride draw adds the base arrival rate again. */

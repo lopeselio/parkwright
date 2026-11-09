@@ -1,5 +1,5 @@
 import type { Content, StaffRole } from '@parkwright/content';
-import { book } from './economy.ts';
+import { book, weeklyWage } from './economy.ts';
 import { SCENERY, accessTiles, entranceFor, idx, inBounds, isPath, rotatedSize, sceneryByName, tileAt } from './map.ts';
 import { Tile, type Dir, type LedgerCategory, type ParkState, type Ride } from './types.ts';
 
@@ -392,7 +392,7 @@ def({
     const n = s.staff.filter((x) => x.role === role).length + 1;
     const [gx, gy] = s.gate;
     s.staff.push({ id, role, name: `${c.staff[role].name} ${n}`, tx: gx, ty: gy, nx: gx, ny: gy, p: 0, dir: 0, goal: null, busy: 0, task: null });
-    return { ok: true, cost: 0, focus: { x: gx, y: gy }, data: { id }, message: `hired ${c.staff[role].name} ${n} for ${(c.staff[role].wage / 100).toFixed(0)} cr a week` };
+    return { ok: true, cost: 0, focus: { x: gx, y: gy }, data: { id }, message: `hired ${c.staff[role].name} ${n} for ${(weeklyWage(s, c, role) / 100).toFixed(0)} cr a week` };
   },
 });
 
