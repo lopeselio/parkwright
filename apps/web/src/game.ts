@@ -110,9 +110,14 @@ export class Game {
       for (const l of this.listeners) l(e);
       if (e.kind === 'day') this.saveLocal();
     });
+    for (const fn of this.replaced ?? []) fn();
   }
 
   on(fn: (e: ParkEvent) => void) { this.listeners.push(fn); }
+
+  private replaced: (() => void)[] = [];
+  /** Called whenever the running park is swapped (new game, load, visit, home). */
+  onReplace(fn: () => void) { this.replaced.push(fn); }
 
   get s() { return this.park.s; }
 
