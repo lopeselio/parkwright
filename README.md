@@ -33,6 +33,7 @@ Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEA
 - Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract.
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
 - Setup (once, by the owner): `cargo near deploy …` (see DESIGN §9), then `pnpm --filter @parkwright/chain setup:patrons`.
+- Do: `pnpm check:gas`. See: a table of the NEAR balance of `parkwright.testnet` and `g0`–`g7` (they pay their own gas), read with the public `view_account` RPC. It exits 1 if any is below 0.1 NEAR (`GAS_MIN_NEAR=0.5 pnpm check:gas` to change that). The `gas-watch` workflow runs it every 6 hours and opens an issue labelled `low-gas` (or comments on the open one). With settlement on, `curl $URL/api/health` shows the same as `gas.low`, refreshed at most every 10 minutes.
 
 ## AI park manager and AI mods (NEAR AI, private inference)
 
