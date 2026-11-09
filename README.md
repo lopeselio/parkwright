@@ -27,6 +27,8 @@ Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 2
 Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEAR account (`g0`–`g7.parkwright.testnet`), whose only key can call `settle_day` and nothing else. When a park syncs to the cloud, each agent settles its visitors' spend for every finished day into the park, on the contract `park.parkwright.testnet`.
 
 - Do: open the game, build a ride, press **Parks → Publish & share**, and let two in-game days pass. See: the Parks panel shows "On NEAR testnet" with the credits settled into your park, and a link to the contract on NearBlocks.
+- Do (owner, once): `./scripts/set-insights-secret.sh`. See: an Application Insights resource `parkwright-insights` on the app's Log Analytics workspace; after the restart, *Live metrics*, *Failures* and *Performance* in the portal show the server's requests, Redis/Cosmos/NEAR calls and exceptions (25% of requests sampled; `INSIGHTS_SAMPLING` changes it).
+- Do (owner, once): `./scripts/backup-policy.sh`. See: Cosmos DB keeps a geo-redundant backup every 4 hours for 7 days (`backupRetentionIntervalInHours: 168`) instead of 8 hours.
 - Do: `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard.
 - Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract.
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
