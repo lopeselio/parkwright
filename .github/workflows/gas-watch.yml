@@ -1,0 +1,66 @@
+name: gas-watch
+# Every 6 hours: are the patron agents (g0..g7) and the server admin able to pay gas?
+# Below GAS_MIN_NEAR, open an issue labelled low-gas (or comment on the open one) so the owner is notified.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      min_near:
+        description: Alert below this many NEAR
+        required: false
+        default: '0.1'
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: gas-watch
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check balances
+        id: check
+        env:
+          GAS_MIN_NEAR: ${{ inputs.min_near || vars.GAS_MIN_NEAR || '0.1' }}
+        run: |
+          set +e
+          pnpm --silent check:gas > report.md
+          code=$?
+          set -e
+          cat report.md
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # 2 = a balance couldn't be read: fail the run, but don't raise an alarm about gas.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
+      - name: Open or update the low-gas issue
+        if: steps.check.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create low-gas --color d93f0b --description 'A NEAR signer is running out of gas money' 2>/dev/null || true
+          {
+            echo "Gas check on $(date -u '+%Y-%m-%d %H:%M UTC') ([run]($RUN_URL)):"
+            echo
+            cat report.md
+            echo
+            echo 'Top them up with testnet NEAR (for example from the faucet or `near send`), then close this issue.'
+          } > body.md
+          issue=$(gh issue list --label low-gas --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body-file body.md
+          else
+            gh issue create --title 'Low gas: a Parkwright signer is below the NEAR threshold' --label low-gas --body-file body.md
+          fi
+      - name: Fail the run so it shows red
+        if: steps.check.outputs.code == '1'
+        run: exit 1
