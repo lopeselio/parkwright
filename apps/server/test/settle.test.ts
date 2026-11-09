@@ -7,6 +7,7 @@ import { settlementLines } from '@parkwright/chain';
 import { afterAll, describe, expect, it } from 'vitest';
 import { MemoryCache } from '../src/cache.ts';
 import { Settler, type ChainApi } from '../src/settle.ts';
+import { Verifier } from '../src/verify.ts';
 import { FileStore, type ParkDoc } from '../src/store.ts';
 
 const dirs: string[] = [];
@@ -132,6 +133,27 @@ describe('settlement worker', () => {
     expect(await s.tick()).toBe(0);
     expect(chain.settled.size).toBe(0);
   });
+
+  it('a claimed park settles once its save is verified by replay, from the replayed spend', async () => {
+    const { store, park } = await parkWithDays(2);
+    const doc = (await store.get('chainpark1'))!;
+    doc.save = { v: 1, snapshot: park.snapshot(), log: park.log, savedAt: 0, fullLog: true };
+    await store.put(doc, doc.version);
+    const chain = fakeChain();
+    chain.owners.set('chainpark1', 'carol.testnet');
+    const cache = new MemoryCache();
+    const s = new Settler(chain.api, store, cache, () => 1e15, new Verifier(cache));
+    await s.markDirty('chainpark1');
+    expect(await s.tick()).toBeGreaterThan(0);
+    // Unverifiable (no full log) claimed parks still don't settle.
+    const bad = (await store.get('chainpark1'))!;
+    bad.save = { ...(bad.save as object), fullLog: false };
+    await store.put(bad, bad.version);
+    const before = chain.settled.size;
+    await s.markDirty('chainpark1');
+    await s.tick();
+    expect(chain.settled.size).toBe(before);
+  }, 30_000);
 
   it('review: days that claim to be ahead of real time are not sent', async () => {
     const now = 1_800_000_000_000;
