@@ -16,7 +16,9 @@ const SHIRTS = colours(['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '
 const TROUSERS = colours(['#3b4a6b', '#2f3440', '#6b5a45', '#4f6d8f', '#c9b48a', '#57534e', '#7a3b3b']);
 const SKIN = colours(['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac']);
 const HAIR = colours(['#2b2018', '#4a3020', '#7a5230', '#c9a060', '#1c1c1c', '#8a3a20', '#9a9a9a']);
-const ROLE = { handyman: '#2f7d4f', mechanic: '#d06a1f', guard: '#2b3f7a', entertainer: '#e04fa0' } as const;
+const ROLE: Record<string, THREE.Color> = { handyman: new THREE.Color('#2f7d4f'), mechanic: new THREE.Color('#d06a1f'), guard: new THREE.Color('#2b3f7a'), entertainer: new THREE.Color('#e04fa0') };
+/** Phones and small windows: smaller shadow map, and people don't cast shadows. */
+const SMALL_SCREEN = typeof matchMedia === 'function' && matchMedia('(max-width: 760px), (pointer: coarse)').matches;
 const STAFF_TROUSERS = new THREE.Color('#2b2f38');
 
 const accents = new Map<string, THREE.Material>();
@@ -57,10 +59,10 @@ export class World {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.OrthographicCamera;
   readonly renderer: THREE.WebGLRenderer;
-  readonly ground: THREE.Mesh;
-  private pathMesh: THREE.InstancedMesh;
-  private queueMesh: THREE.InstancedMesh;
-  private litterMesh: THREE.InstancedMesh;
+  ground!: THREE.Mesh;
+  private pathMesh!: THREE.InstancedMesh;
+  private queueMesh!: THREE.InstancedMesh;
+  private litterMesh!: THREE.InstancedMesh;
   private crowd: Crowd;
   private staff: Crowd;
   private rides = new Map<number, RideView>();
@@ -92,14 +94,16 @@ export class World {
 
     // A soft studio environment (generated once, no download) so metal and gloss have something to reflect.
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const room = new RoomEnvironment();
+    this.scene.environment = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
     this.scene.environmentIntensity = 0.35;
     pmrem.dispose();
     const hemi = new THREE.HemisphereLight('#fff6e0', '#6a8a5a', 0.65);
     const sun = new THREE.DirectionalLight('#fff1d6', 2.2);
     sun.position.set(-30, 50, -20);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.setScalar(SMALL_SCREEN ? 1024 : 2048);
     sun.shadow.camera.far = 200;
     sun.shadow.bias = -0.0003;
     sun.shadow.normalBias = 0.02;
@@ -107,31 +111,10 @@ export class World {
     this.sun = sun;
 
     const st = s();
-    const g = new THREE.PlaneGeometry(st.w, st.h, st.w, st.h);
-    g.rotateX(-Math.PI / 2);
-    this.ground = new THREE.Mesh(g, this.grassMaterial(st.w, st.h));
-    this.ground.position.set(st.w / 2, 0, st.h / 2);
-    this.ground.receiveShadow = true;
-    this.scene.add(this.ground);
-    const skirt = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.4, 1.2, st.h + 0.4), mat('#7a5a3a'));
-    skirt.position.set(st.w / 2, -0.61, st.h / 2);
-    this.scene.add(skirt);
-    const outside = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), mat('#9cc98a'));
-    outside.position.set(st.w / 2, -1.2, st.h / 2);
-    this.scene.add(outside);
+    this.buildGround(st);
 
-    const tileGeo = new THREE.BoxGeometry(1, 0.06, 1);
-    const n = st.w * st.h;
-    const paving = this.pavingTexture();
-    this.pathMesh = new THREE.InstancedMesh(tileGeo, new THREE.MeshStandardMaterial({ color: '#d8c9a8', map: paving, roughness: 0.9 }), n);
-    this.queueMesh = new THREE.InstancedMesh(tileGeo, new THREE.MeshStandardMaterial({ color: '#9fb6cf', map: paving, roughness: 0.85 }), n);
-    for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; this.scene.add(m); }
-    this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
-    this.litterMesh.count = 0;
-    this.scene.add(this.litterMesh);
-
-    this.crowd = new Crowd(MAX_PEOPLE, this.scene);
-    this.staff = new Crowd(MAX_STAFF, this.scene, 1.08);
+    this.crowd = new Crowd(MAX_PEOPLE, this.scene, 1, !SMALL_SCREEN);
+    this.staff = new Crowd(MAX_STAFF, this.scene, 1.08, !SMALL_SCREEN);
 
     this.fallbackProps();
     this.gate = this.buildGate();
@@ -156,6 +139,54 @@ export class World {
   }
 
   private sun: THREE.DirectionalLight;
+  private groundParts: THREE.Object3D[] = [];
+  private groundSize = '';
+  private lastState: ParkState | null = null;
+  private lastTileTick = -1;
+
+  /** Ground, edges and the per-tile meshes, sized for this park (rebuilt when a park of another size loads). */
+  private buildGround(st: ParkState) {
+    for (const o of this.groundParts) {
+      this.scene.remove(o);
+      const m = o as THREE.Mesh;
+      m.geometry?.dispose();
+      if (m === this.ground) (m.material as THREE.Material).dispose();
+      if ((m as THREE.InstancedMesh).isInstancedMesh) (m as THREE.InstancedMesh).dispose();
+    }
+    const g = new THREE.PlaneGeometry(st.w, st.h, st.w, st.h);
+    g.rotateX(-Math.PI / 2);
+    this.ground = new THREE.Mesh(g, this.grassMaterial(st.w, st.h));
+    this.ground.position.set(st.w / 2, 0, st.h / 2);
+    this.ground.receiveShadow = true;
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.4, 1.2, st.h + 0.4), mat('#7a5a3a'));
+    skirt.position.set(st.w / 2, -0.61, st.h / 2);
+    const outside = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), mat('#9cc98a'));
+    outside.position.set(st.w / 2, -1.2, st.h / 2);
+    const tileGeo = new THREE.BoxGeometry(1, 0.06, 1);
+    const n = st.w * st.h;
+    this.paving ??= this.pavingTexture();
+    this.pathMesh = new THREE.InstancedMesh(tileGeo, this.pathMat ??= new THREE.MeshStandardMaterial({ color: '#d8c9a8', map: this.paving, roughness: 0.9 }), n);
+    this.queueMesh = new THREE.InstancedMesh(tileGeo, this.queueMat ??= new THREE.MeshStandardMaterial({ color: '#9fb6cf', map: this.paving, roughness: 0.85 }), n);
+    for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; }
+    this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
+    this.litterMesh.count = 0;
+    this.groundParts = [this.ground, skirt, outside, this.pathMesh, this.queueMesh, this.litterMesh];
+    this.scene.add(...this.groundParts);
+    this.groundSize = `${st.w}x${st.h}`;
+  }
+  private paving: THREE.Texture | undefined;
+  private pathMat: THREE.Material | undefined;
+  private queueMat: THREE.Material | undefined;
+
+  /** A different park was loaded (new game, visit, home): resize the ground if needed and rebuild everything keyed on the map. */
+  private onNewPark(st: ParkState) {
+    if (`${st.w}x${st.h}` !== this.groundSize) this.buildGround(st);
+    if (this.gate) { this.scene.remove(this.gate); this.gate = this.buildGate(); this.scene.add(this.gate); }
+    this.mapVersion = -1;
+    this.furnitureVersion = -1;
+    this.sceneryKey = '';
+    this.lastTileTick = -1;
+  }
 
   private grassMaterial(w: number, h: number) {
     // The tile checker stays (it reads as a grid), with mown stripes and a scatter of darker and lighter tufts.
@@ -223,8 +254,8 @@ export class World {
     if (!p) {
       const t = this.templates.get(name);
       if (!t) return null;
-      // Fences ring the whole park: plenty of them and their shadows add little.
-      p = new PropSet(t, name !== 'fence');
+      // Only big props cast shadows; benches, lamps, bins, flower beds and fences are many and small.
+      p = new PropSet(t, /^(oak|pine|fountain|hedge|tree)/.test(name));
       this.scene.add(p.group);
       this.props.set(name, p);
     }
@@ -515,7 +546,7 @@ export class World {
       p.set(s.tx + dx * f + 0.5, 0, s.ty + dy * f + 0.5);
       const step = (s.p + alpha * 2 + s.id) * 0.4;
       staff.add(p, moving ? Math.atan2(dx, dy) : 0, moving ? Math.sin(step) * 0.5 : 0,
-        this.tmp.c.set(ROLE[s.role]), STAFF_TROUSERS, SKIN[(s.id * 7) % SKIN.length], HAIR[(s.id * 3) % HAIR.length]);
+        ROLE[s.role] ?? STAFF_TROUSERS, STAFF_TROUSERS, SKIN[(s.id * 7) % SKIN.length], HAIR[(s.id * 3) % HAIR.length]);
     }
     staff.end();
   }
@@ -539,7 +570,10 @@ export class World {
   /** alpha: fraction of the way to the next sim tick, for smooth walking. */
   render(time: number, alpha: number) {
     const st = this.s();
-    if (st.mapVersion !== this.mapVersion || (st.tick & 15) === 0) { this.syncTiles(st); this.mapVersion = st.mapVersion; }
+    if (st !== this.lastState) { if (this.lastState) this.onNewPark(st); this.lastState = st; }
+    // Tiles: on any map change, and every 16 ticks for litter-driven bins (once per tick, not every frame while paused).
+    const tileTick = st.tick >> 4;
+    if (st.mapVersion !== this.mapVersion || tileTick !== this.lastTileTick) { this.syncTiles(st); this.mapVersion = st.mapVersion; this.lastTileTick = tileTick; }
     if (st.mapVersion !== this.furnitureVersion) { this.syncFurniture(st); this.furnitureVersion = st.mapVersion; }
     this.syncRides(st);
     this.syncScenery(st);
