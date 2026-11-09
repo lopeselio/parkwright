@@ -276,7 +276,7 @@ export class Onboarding {
     const keys: [string, string][] = [
       ['Click / drag', 'build with the chosen tool; drag paths and scenery'],
       ['R', 'rotate what you’re placing'], ['Q / E', 'turn the camera'], ['WASD / arrows', 'pan'], ['Wheel / pinch', 'zoom'],
-      ['Space', 'pause / resume'], ['1 finger', 'tap to build or select; drag lays paths, or pans with Inspect'], ['2 fingers', 'pinch to zoom, drag to pan, twist to turn the view'], ['⟲ R ⟳', 'on touch screens: turn the view, rotate the piece; ❚❚ in the top bar pauses'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
+      ['Space', 'pause / resume'], ['M', 'sound on / off (or 🔊 under the top bar)'], ['1 finger', 'tap to build or select; drag lays paths, or pans with Inspect'], ['2 fingers', 'pinch to zoom, drag to pan, twist to turn the view'], ['⟲ R ⟳', 'on touch screens: turn the view, rotate the piece; ❚❚ in the top bar pauses'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
     ];
     const sec = (title: string, ...kids: (Node | string)[]) => h('section', {}, h('h3', {}, title), ...kids);
     const panel = h('div', { class: 'ob-sheet' },
