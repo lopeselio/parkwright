@@ -18,6 +18,11 @@ Work in progress. See DESIGN.md.
 
 Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 24 40`, then `ride build teacups 21 34 --rot 1`, then `ride open teacups`. Visitors walk in from the gate and queue for the ride.
 
+## Tests
+
+- Do: `pnpm test`. See: the sim, server, chain and AI unit tests.
+- Do: `pnpm e2e` (first time: `pnpm --filter @parkwright/e2e exec playwright install chromium`). See: it builds the web app, starts the real server on :8931 with file saves and no chain or AI keys, and headless Chromium checks the title screen and New park flow, building a path and a ride (ride count up, cash down by the cost), `?` and Esc for How to play, and Publish & share followed by `/api/parks/<id>/verify` reporting `verified: true`, with no console errors. CI runs the same in the `e2e` job and uploads the Playwright report when it fails.
+
 ## Host it
 
 `scripts/deploy-azure.sh` builds the image in Azure Container Registry and rolls out the Azure Container App (resource group `parkwright`, North Europe). The first run creates everything. It prints the URL and checks `/api/health`.
