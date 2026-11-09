@@ -6,8 +6,9 @@ import { handleBridge } from './bridge.ts';
 import { claudeTerminalEnabled, isLocalRequest } from './claude.ts';
 import { LocalRelay, type Relay } from './relay.ts';
 import { serveStatic } from './static.ts';
+import type { GasWatch } from './gas.ts';
 
-export function createApp(deps: Deps & { ai?: NearAiClient; relay?: Relay }, opts: { webDist: string; version: string }): Server {
+export function createApp(deps: Deps & { ai?: NearAiClient; relay?: Relay; gas?: GasWatch }, opts: { webDist: string; version: string }): Server {
   const relay = deps.relay ?? new LocalRelay();
   const statics = serveStatic(opts.webDist);
   return createServer(async (req, res) => {
@@ -15,7 +16,7 @@ export function createApp(deps: Deps & { ai?: NearAiClient; relay?: Relay }, opt
       const path = (req.url ?? '/').split('?')[0];
       if (path === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler, ai: deps.ai?.model ?? null, bridge: relay.kind }));
+        res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler, ai: deps.ai?.model ?? null, bridge: relay.kind, ...(deps.gas ? { gas: await deps.gas.status() } : {}) }));
         return;
       }
       if (path === '/api/claude/status') {
