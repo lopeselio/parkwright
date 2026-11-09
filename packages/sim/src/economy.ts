@@ -136,11 +136,11 @@ export function arrivalRate(s: ParkState, c: Content): number {
   for (const v of s.visitors) if (v.mode !== 'gone') here++;
   if (rulesOf(s) >= 2) {
     // v2: what's on offer drives demand, word of mouth builds with every visitor so far, and a park
-    // holds four to five visitors per point of draw before word gets round that it's packed.
+    // holds three and a half to five visitors per point of draw before word gets round that it's packed.
     rate *= 1 + draw / ARRIVAL_DRAW;
     rate *= Math.min(1, (AWARE_START + s.totalVisitors) / AWARE_FULL);
-    if (here > draw * 5.5) rate /= 3;
-    else if (here > draw * 4) rate /= 1.6;
+    if (here > draw * 5) rate /= 3;
+    else if (here > draw * 3.5) rate /= 1.6;
   } else if (here > draw * 3) rate /= 3;
   else if (here > draw * 2) rate /= 1.6;
   const vfm = valueForMoney(s);
