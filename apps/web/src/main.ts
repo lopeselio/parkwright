@@ -30,7 +30,7 @@ const toggleTerminal = (open = !termHost.classList.contains('open')) => {
 };
 const cloud = new Cloud(game);
 new Hud(game, tools, () => toggleTerminal(), cloud);
-const onboarding = new Onboarding(game, tools, world);
+const onboarding = new Onboarding(game, tools, world, cloud);
 
 // ?park=<id> opens a shared park (yours resumes; anyone else's becomes a copy you play).
 const shared = new URLSearchParams(location.search).get('park');
