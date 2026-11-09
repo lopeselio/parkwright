@@ -3,9 +3,10 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { DX, DY, SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
-import { loadModel } from './assets.ts';
+import { loadModel, loadProps } from './assets.ts';
 import { buildCoaster } from './coaster.ts';
 import { Crowd } from './people.ts';
+import { PropSet } from './props.ts';
 
 /** Tile (x,y) centre in world space. 1 tile = 1 unit. */
 export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0, y + 0.5);
@@ -28,6 +29,13 @@ function accent(base: THREE.Material, color: string) {
     accents.set(key, m);
   }
   return m;
+}
+
+/** A well-mixed hash of a tile, for picking variants and placing furniture. */
+function hash(x: number, y: number) {
+  let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
 }
 const MAX_PEOPLE = 4000;
 const MAX_STAFF = 200;
@@ -52,13 +60,15 @@ export class World {
   readonly ground: THREE.Mesh;
   private pathMesh: THREE.InstancedMesh;
   private queueMesh: THREE.InstancedMesh;
-  private binMesh: THREE.InstancedMesh;
   private litterMesh: THREE.InstancedMesh;
   private crowd: Crowd;
   private staff: Crowd;
   private rides = new Map<number, RideView>();
-  private scenery = new Map<number, THREE.Object3D>();
-  private gate: THREE.Group;
+  /** Prop templates by name: procedural stand-ins until scenery.glb loads. */
+  private templates = new Map<string, THREE.Object3D>();
+  private props = new Map<string, PropSet>();
+  private gate: THREE.Object3D;
+  private furnitureVersion = -1;
   private mapVersion = -1;
   private sceneryKey = '';
   readonly ghost = new THREE.Group();
@@ -115,18 +125,29 @@ export class World {
     this.pathMesh = new THREE.InstancedMesh(tileGeo, mat('#d8c9a8'), n);
     this.queueMesh = new THREE.InstancedMesh(tileGeo, mat('#9fb6cf'), n);
     for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; this.scene.add(m); }
-    this.binMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.08, 0.07, 0.22, 8), mat('#3e6e4a'), n);
-    this.binMesh.castShadow = true;
-    this.binMesh.count = 0;
     this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
     this.litterMesh.count = 0;
-    this.scene.add(this.binMesh, this.litterMesh);
+    this.scene.add(this.litterMesh);
 
     this.crowd = new Crowd(MAX_PEOPLE, this.scene);
     this.staff = new Crowd(MAX_STAFF, this.scene, 1.08);
 
+    this.fallbackProps();
     this.gate = this.buildGate();
     this.scene.add(this.gate);
+    // Swap in the Blender-built props (trees, benches, lamps, bins, fences, gate) when they arrive.
+    loadProps().then((props) => {
+      if (!props.size) return;
+      for (const [name, o] of props) this.templates.set(name, o);
+      for (const p of this.props.values()) p.dispose();
+      this.props.clear();
+      this.scene.remove(this.gate);
+      this.gate = this.buildGate();
+      this.scene.add(this.gate);
+      this.sceneryKey = '';
+      this.furnitureVersion = -1;
+      this.mapVersion = -1;
+    });
     this.scene.add(this.ghost);
     this.target.copy(tileCenter(st.gate[0], st.gate[1] - 10));
     this.resize();
@@ -150,10 +171,42 @@ export class World {
     return new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
   }
 
+  /** Procedural stand-ins for the props, used until (or if) scenery.glb loads. */
+  private fallbackProps() {
+    for (const [name, id] of [['oak_a', 1], ['oak_b', 1], ['pine_a', 5], ['pine_b', 5], ['flower', 2], ['fountain', 3], ['hedge', 4]] as const) {
+      const g = buildScenery(id);
+      g.scale.setScalar(1);
+      this.templates.set(name, g);
+    }
+    const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.22, 8), mat('#3e6e4a'));
+    bin.position.y = 0.11;
+    this.templates.set('bin', new THREE.Group().add(bin));
+  }
+
+  private propSet(name: string): PropSet | null {
+    let p = this.props.get(name);
+    if (!p) {
+      const t = this.templates.get(name);
+      if (!t) return null;
+      // Fences ring the whole park: plenty of them and their shadows add little.
+      p = new PropSet(t, name !== 'fence');
+      this.scene.add(p.group);
+      this.props.set(name, p);
+    }
+    return p;
+  }
+
   private buildGate() {
     const st = this.s();
-    const g = new THREE.Group();
     const p = tileCenter(st.gate[0], st.gate[1]);
+    const glb = this.templates.get('gate');
+    if (glb) {
+      const g = glb.clone();
+      g.position.copy(p);
+      g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true; });
+      return g;
+    }
+    const g = new THREE.Group();
     for (const sx of [-0.55, 0.55]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.4, 0.18), mat('#c0533a'));
       post.position.set(sx, 0.7, 0);
@@ -240,16 +293,54 @@ export class World {
 
   private syncTiles(st: ParkState) {
     const m = new THREE.Matrix4();
-    let np = 0, nq = 0, nb = 0;
+    const bins: THREE.Matrix4[] = [];
+    let np = 0, nq = 0;
     for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
       const k = y * st.w + x;
       const t = st.tiles[k];
       if (t === Tile.Path) { m.makeTranslation(x + 0.5, 0.03, y + 0.5); this.pathMesh.setMatrixAt(np++, m); }
       else if (t === Tile.Queue) { m.makeTranslation(x + 0.5, 0.035, y + 0.5); this.queueMesh.setMatrixAt(nq++, m); }
-      if (st.bins[k]) { m.makeTranslation(x + 0.82, 0.14, y + 0.82); this.binMesh.setMatrixAt(nb++, m); }
+      if (st.bins[k]) bins.push(PropSet.at(x + 0.82, y + 0.82));
     }
-    this.pathMesh.count = np; this.queueMesh.count = nq; this.binMesh.count = nb;
-    for (const im of [this.pathMesh, this.queueMesh, this.binMesh]) im.instanceMatrix.needsUpdate = true;
+    this.pathMesh.count = np; this.queueMesh.count = nq;
+    for (const im of [this.pathMesh, this.queueMesh]) {
+      im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+    }
+    this.propSet('bin')?.set(bins);
+  }
+
+  /** Lamps and benches along the path edges, and the fence round the park. Decoration only: the sim never sees them. */
+  private syncFurniture(st: ParkState) {
+    const lamps: THREE.Matrix4[] = [], benches: THREE.Matrix4[] = [], fences: THREE.Matrix4[] = [];
+    const entrances = new Set(st.rides.map((r) => r.ey * st.w + r.ex));
+    const open = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.tiles[y * st.w + x] === Tile.Grass && !st.occ[y * st.w + x];
+    for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+      const k = y * st.w + x;
+      if (st.tiles[k] !== Tile.Path || st.bins[k] || entrances.has(k) || (x === st.gate[0] && y === st.gate[1])) continue;
+      const r = hash(x, y);
+      const lamp = r % 9 === 0, bench = r % 11 === 4;
+      if (!lamp && !bench) continue;
+      for (let i = 0; i < 4; i++) {
+        const d = (i + (r >>> 8)) & 3;
+        if (!open(x + DX[d], y + DY[d])) continue;
+        const cx = x + 0.5, cz = y + 0.5;
+        if (lamp) lamps.push(PropSet.at(cx + DX[d] * 0.44 - DY[d] * 0.36, cz + DY[d] * 0.44 + DX[d] * 0.36));
+        else benches.push(PropSet.at(cx + DX[d] * 0.36, cz + DY[d] * 0.36, Math.atan2(-DX[d], -DY[d])));
+        break;
+      }
+    }
+    for (let x = 0; x < st.w; x++) {
+      fences.push(PropSet.at(x + 0.5, 0));
+      if (x !== st.gate[0]) fences.push(PropSet.at(x + 0.5, st.h, Math.PI));
+    }
+    for (let y = 0; y < st.h; y++) {
+      fences.push(PropSet.at(0, y + 0.5, Math.PI / 2));
+      fences.push(PropSet.at(st.w, y + 0.5, -Math.PI / 2));
+    }
+    this.propSet('lamp')?.set(lamps);
+    this.propSet('bench')?.set(benches);
+    this.propSet('fence')?.set(fences);
   }
 
   private syncRides(st: ParkState) {
@@ -316,17 +407,20 @@ export class World {
     for (let k = 0; k < st.scenery.length; k++) if (st.scenery[k]) key += k + ':' + st.scenery[k] + ',';
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
-    for (const [k, o] of this.scenery) if (st.scenery[k] !== o.userData.id) { this.scene.remove(o); disposeTree(o); this.scenery.delete(k); }
+    const lists = new Map<string, THREE.Matrix4[]>();
+    for (const name of ['oak_a', 'oak_b', 'pine_a', 'pine_b', 'flower', 'fountain', 'hedge']) lists.set(name, []);
     for (let k = 0; k < st.scenery.length; k++) {
       const id = st.scenery[k];
-      if (!id || this.scenery.has(k)) continue;
-      const o = buildScenery(id);
-      o.userData.id = id;
-      o.position.set((k % st.w) + 0.5, 0, Math.floor(k / st.w) + 0.5);
-      o.rotation.y = (k * 1.7) % (Math.PI * 2);
-      this.scene.add(o);
-      this.scenery.set(k, o);
+      if (!id) continue;
+      const x = k % st.w, y = Math.floor(k / st.w), r = hash(x, y);
+      const tree = id === 1 || id === 5;
+      const name = id === 1 ? (r & 1 ? 'oak_b' : 'oak_a') : id === 5 ? (r & 1 ? 'pine_b' : 'pine_a') : id === 2 ? 'flower' : id === 3 ? 'fountain' : 'hedge';
+      // Trees turn and vary in size; beds, fountains and hedges stay square to the grid.
+      const yaw = tree ? (k * 1.7) % (Math.PI * 2) : ((r >>> 3) & 3) * (Math.PI / 2);
+      const s = tree ? 0.85 + ((r >>> 5) % 31) / 100 : 1;
+      lists.get(name)!.push(PropSet.at(x + 0.5, y + 0.5, yaw, s));
     }
+    for (const [name, list] of lists) this.propSet(name)?.set(list);
   }
 
   private tmp = { m: new THREE.Matrix4(), h: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(1, 1, 1), p: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color() };
@@ -394,12 +488,14 @@ export class World {
     }
     this.litterMesh.count = n;
     this.litterMesh.instanceMatrix.needsUpdate = true;
+    this.litterMesh.computeBoundingSphere();
   }
 
   /** alpha: fraction of the way to the next sim tick, for smooth walking. */
   render(time: number, alpha: number) {
     const st = this.s();
     if (st.mapVersion !== this.mapVersion || (st.tick & 15) === 0) { this.syncTiles(st); this.mapVersion = st.mapVersion; }
+    if (st.mapVersion !== this.furnitureVersion) { this.syncFurniture(st); this.furnitureVersion = st.mapVersion; }
     this.syncRides(st);
     this.syncScenery(st);
     this.syncPeople(st, alpha);

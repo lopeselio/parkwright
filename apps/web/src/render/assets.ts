@@ -59,3 +59,18 @@ export async function loadModel(id: string): Promise<THREE.Group | null> {
   }
   return clone;
 }
+
+let props: Promise<Map<string, THREE.Object3D>> | null = null;
+
+/** Scenery props from scenery.glb ("prop_oak_a" → "oak_a"), or an empty map if there is none. */
+export function loadProps(): Promise<Map<string, THREE.Object3D>> {
+  props ??= available().then(async (have) => {
+    const out = new Map<string, THREE.Object3D>();
+    if (!have.has('scenery')) return out;
+    const g = await loader.loadAsync('/models/scenery.glb');
+    g.scene.updateMatrixWorld(true);
+    for (const o of g.scene.children) if (o.name.startsWith('prop_')) out.set(o.name.slice(5), o);
+    return out;
+  }).catch(() => new Map());
+  return props;
+}
