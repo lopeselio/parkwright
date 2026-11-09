@@ -207,7 +207,12 @@ The terminal can also make mods. You describe what you want, an AI writes the mo
 Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with admin `parkwright.testnet`.
 
 - **Credits:** an NEP-141 token, symbol `CR`, 2 decimals. 1 credit = 100 units = 100 in-game cents. It implements `ft_transfer`, `ft_balance_of`, `ft_total_supply` and `ft_metadata`. Transfers only go to accounts that already hold credits, own a park, or are patrons; that keeps storage bounded without storage deposits.
-- **Parks:** `register_park(park_id, name, owner?)` is admin-only, so nobody can front-run a park id or spam storage. The server registers each cloud park on its first publish, owned by the admin until a player claims it with `transfer_park`. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
+- **Parks:** `register_park(park_id, name, owner?)` is admin-only, so nobody can front-run a park id or spam storage. The server registers each cloud park on its first publish, owned by the admin until a player claims it.
+- **Claiming:** a player claims a park through `assign_park(park_id, owner)`. It is admin-only, and works only while the admin still holds the park, so a claim is final and the server can never take a claimed park back. Afterwards only the owner can move it (`transfer_park`, 1 yocto). Before the server calls it (`apps/server/src/claim.ts`), the player must prove three things:
+  1. they published the park: the park's secret key, which only the publishing browser holds;
+  2. they own the account: a NEP-413 signature over a one-time, 5-minute server challenge ("Claim Parkwright park <id>", recipient `parkwright`), made with a **full-access** key of that account (checked on chain via near-kit);
+  3. the park is verified by replay.
+  Claimed parks keep settling, but only from verified, replayed spend. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
 - **Patrons** (agent visitors): `p0`–`p7.parkwright.testnet`, one per visitor group in the sim.
   - Each patron's only key is a function-call key for `settle_day` on the contract. It has no full-access key, so it can't move NEAR or call anything else.
   - The admin sets each patron's `day_cap` (1,000 CR per park-day) and mints its budget (`fund_patrons`, 20,000 CR, topped up automatically below 5,000 CR).
@@ -230,7 +235,7 @@ Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with
   - Parks that load cost-changing mod rules partway through also fail, conservatively.
   - The caps stay as a second line of defence.
 - **Keys:** settle_day burns ~3 Tgas (measured). The first patrons' keys have a lifetime allowance of 0.12 NEAR, roughly 400 settlements each. New patrons get keys with no allowance, limited by the account's own 0.3 NEAR. A function-call-only account can't be rekeyed, so the fix is new patron accounts plus `set_patron(old, active=false)`.
-- **Later:** contractor agents that bid to build coasters, paid from escrow; players claiming parks with NEAR Auth.
+- **Later:** contractor agents that bid to build coasters, paid from escrow.
 
 ## 10. Architecture
 
