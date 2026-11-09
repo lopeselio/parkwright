@@ -19,6 +19,8 @@ function save(seed: number) {
 }
 
 const owners = new Map<string, string>();
+/** Parks whose assign transaction "lands but the RPC times out". */
+const flaky = new Set<string>();
 const assigned: [string, string][] = [];
 const chain: ClaimChain = {
   admin: 'admin.testnet',
@@ -26,7 +28,11 @@ const chain: ClaimChain = {
   recipient: 'parkwright',
   parkOwner: async (id) => owners.get(id) ?? null,
   registerPark: async (id) => { owners.set(id, 'admin.testnet'); },
-  assignPark: async (id, owner) => { if (owners.get(id) !== 'admin.testnet') throw new Error('already been claimed'); owners.set(id, owner); assigned.push([id, owner]); },
+  assignPark: async (id, owner) => {
+    if (owners.get(id) !== 'admin.testnet') throw new Error('already been claimed');
+    owners.set(id, owner); assigned.push([id, owner]);
+    if (flaky.has(id)) throw new Error('RPC timeout');
+  },
   // A "valid" signature is one whose text is good:<account>:<park>.
   verifySignature: async (s, id, nonce) => nonce.length === 32 && s.signature === `good:${s.accountId}:${id}`,
 };
@@ -95,5 +101,24 @@ describe('claiming a park', () => {
     const r = await post(`/api/parks/${p.id}/claim`, { signed: signed('carol.testnet', p.id), nonce: ch.body.nonce }, p.key);
     expect(r.status).toBe(409);
     expect(r.body.error).toMatch(/verified/);
+  }, 30_000);
+
+  it('review: the CURRENT save must verify, not just an earlier version', async () => {
+    const p = await publish(44);
+    const tampered = save(44) as any;
+    tampered.snapshot.cash += 1;
+    const put = await fetch(`${base}/api/parks/${p.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-park-key': p.key, 'if-match': '1' }, body: JSON.stringify({ save: tampered, version: 1 }) });
+    expect(put.status).toBeLessThan(300);
+    const ch = await post(`/api/parks/${p.id}/claim/challenge`, {}, p.key);
+    const r = await post(`/api/parks/${p.id}/claim`, { signed: signed('carol.testnet', p.id), nonce: ch.body.nonce }, p.key);
+    expect(r.status).toBe(409);
+  }, 30_000);
+
+  it('review: a claim whose transaction landed despite an RPC error still succeeds', async () => {
+    const p = await publish(45);
+    flaky.add(p.id);
+    const ch = await post(`/api/parks/${p.id}/claim/challenge`, {}, p.key);
+    const r = await post(`/api/parks/${p.id}/claim`, { signed: signed('dave.testnet', p.id), nonce: ch.body.nonce }, p.key);
+    expect(r).toEqual({ status: 200, body: { id: p.id, owner: 'dave.testnet' } });
   }, 30_000);
 });
