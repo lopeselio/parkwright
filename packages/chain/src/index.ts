@@ -113,7 +113,8 @@ export const getPatron = (account: string) => view<PatronOnChain | null>('get_pa
 export const lastSettledDay = (patron: string, parkId: string) => view<number | null>('last_settled_day', { patron, park_id: parkId });
 
 /** What a player signs to claim a park (NEP-413, through their wallet). */
-export const CLAIM_RECIPIENT = 'parkwright';
+/** The recipient a wallet shows when signing a claim: the park contract itself (no other app uses it). */
+export const CLAIM_RECIPIENT = CONTRACT;
 export const claimMessage = (parkId: string) => `Claim Parkwright park ${parkId}`;
 
 /**
