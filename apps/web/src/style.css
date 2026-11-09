@@ -107,7 +107,7 @@ kbd { background: #2e2b36; padding: 0 6px; border-radius: 4px; }
   /* The menu gets its own full-width row, buttons sharing it, so nothing runs off the right edge. */
   .menu { width: 100%; min-width: 0; }
   .menu button { flex: 1 1 0; min-width: 0; padding: 6px 4px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .menu .help-btn { flex: 0 0 auto; padding: 6px 10px; }
+  .menu .help-btn { flex: 0 0 32px; width: 32px; height: 32px; padding: 0; }
   .menu .term-btn { flex: 0 0 auto; padding: 6px 10px; }
   .term-label { display: none; }
   .bar { width: 50px; }
@@ -189,4 +189,4 @@ button.link { border: none; background: none; color: var(--muted); text-decorati
 /* Phones: the toolbar is a bottom bar, and the drawer and side panel sit above it, so the camera buttons
    go in a column on the right edge, clear of all three. */
 @media (max-width: 760px) { #cam { top: 50%; bottom: auto; transform: translateY(-50%); flex-direction: column; right: 8px; } }
-@media (max-width: 380px) { .menu { gap: 4px; } .menu button { font-size: 12px; padding: 6px 2px; } .menu .term-btn, .menu .help-btn { padding: 6px 8px; } }
+@media (max-width: 380px) { .menu { gap: 4px; } .menu button { font-size: 12px; padding: 6px 2px; } .menu .term-btn { padding: 6px 8px; } }
