@@ -1,7 +1,7 @@
 import type { Content } from '@parkwright/content';
 import { ACTIONS, checkParams, findRideType, type ActionResult, type Hook } from './actions.ts';
 import './coaster.ts'; // registers coaster.* actions
-import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues, weeklyWage } from './economy.ts';
+import { arrivalRate, book, capSpend, computeRating, emptyLedger, parkValue, refreshRideValues, weeklyWage } from './economy.ts';
 import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
 import { payUpkeep, updateRide, wearRide } from './rides.ts';
@@ -58,10 +58,14 @@ export class Park {
   private here = 0;
   private hereTick = -1;
   private hereOf: Visitor[] | null = null;
+  private hereLen = -1;
   /** Reused buffer for the per-tick crowd counts (rules v2+). */
   private crowdBuf: Uint16Array | null = null;
 
   constructor(public s: ParkState, public c: Content) {
+    // A save from a newer (or corrupted) sim can't be played faithfully here, and could never verify.
+    const r = (s as { rules?: unknown }).rules;
+    if (r !== undefined && !(Number.isInteger(r) && (r as number) >= 1 && (r as number) <= RULES)) throw new Error(`this park was made with sim rules ${JSON.stringify(r)}; this version of Parkwright plays rules 1–${RULES}`);
     this.routes = new Routes(() => this.s);
   }
 
@@ -169,7 +173,7 @@ export class Park {
   tick() {
     const s = this.s, c = this.c;
     s.tick++;
-    const rate = arrivalRate(s, c, this.hereTick === s.tick - 1 && this.hereOf === s.visitors ? this.here : undefined);
+    const rate = arrivalRate(s, c, this.hereTick === s.tick - 1 && this.hereOf === s.visitors && this.hereLen === s.visitors.length ? this.here : undefined);
     if (chance(s.rng, Math.round(rate * 100), TICKS_PER_DAY * 100)) spawnVisitor(s, c);
     const crowd = this.crowd();
     let here = 0;
@@ -180,7 +184,7 @@ export class Park {
     if (s.tick % TICKS_PER_DAY === 0) this.endDay();
     // Nothing after the visitor loop (rides, staff, end of day) or between ticks (actions) turns anyone
     // into 'gone' or back, so the count carries to the next tick's arrival roll unchanged.
-    this.here = here; this.hereTick = s.tick; this.hereOf = s.visitors;
+    this.here = here; this.hereTick = s.tick; this.hereOf = s.visitors; this.hereLen = s.visitors.length;
   }
 
   /** Rules v2+: walking visitors per tile at the start of this tick (v1 counts on demand instead). */
@@ -218,6 +222,8 @@ export class Park {
     s.today.rating = s.rating;
     s.incidents = Math.max(0, s.incidents - 10);
     const done = s.today;
+    // v2: the day's settlement record never asks the chain for more than its caps allow.
+    if (rulesOf(s) >= 2) capSpend(done.spend);
     s.history.push(done);
     if (s.history.length > DAYS_PER_SEASON * 2) s.history.shift();
     s.day++;
