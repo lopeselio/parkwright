@@ -1,4 +1,4 @@
-import type { Ratings, StaffRole } from '@parkwright/content';
+import type { Objective, Ratings, Scenario, StaffRole } from '@parkwright/content';
 import type { RngState } from './rng.ts';
 
 export const TICKS_PER_DAY = 1800;
@@ -177,6 +177,8 @@ export interface DayStats {
  */
 export const RULES = 2;
 export const rulesOf = (s: Pick<ParkState, 'rules'>): number => s.rules ?? 1;
+/** The scenario's goal under the park's rules version (`rules` defaults to the current version, for new parks). */
+export const objectiveOf = (sc: Scenario, rules: number = RULES): Objective => sc.objectives?.[rules] ?? sc.objective;
 
 export interface ParkState {
   version: 1;

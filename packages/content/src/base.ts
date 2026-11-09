@@ -37,7 +37,7 @@ export const basePack: ModPack = {
     {
       id: 'meadow',
       name: 'Meadow Start',
-      blurb: 'A flat meadow by the road. Reach 120 visitors with a park rating of 600 by day 56.',
+      blurb: 'A flat meadow by the road.',
       size: [48, 48],
       gate: [24, 47],
       cash: 1500000,
@@ -52,6 +52,8 @@ export const basePack: ModPack = {
         { id: 'thrill', thrill: [500, 1000], stomach: 3, weight: 2 },
       ],
       objective: { kind: 'visitors', count: 120, minRating: 600, byDay: 56 },
+      // v2 parks fill up far faster: a well-run meadow park reaches ~1,000 visitors in a few weeks.
+      objectives: { 2: { kind: 'visitors', count: 1000, minRating: 650, byDay: 56 } },
       rides: [],
       paths: [[24, 47], [24, 46], [24, 45], [24, 44], [24, 43], [24, 42], [24, 41], [24, 40]],
     },

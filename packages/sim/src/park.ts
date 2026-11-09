@@ -6,7 +6,7 @@ import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
 import { payUpkeep, updateRide, wearRide } from './rides.ts';
 import { updateStaff } from './staff.ts';
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, RULES, rulesOf, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, objectiveOf, RULES, rulesOf, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
 import { spawnVisitor, updateVisitor, type Crowd } from './visitors.ts';
 
 const beauty = (id: number) => SCENERY[id]?.beauty ?? 0;
@@ -240,7 +240,7 @@ export class Park {
   private checkObjective() {
     const s = this.s, c = this.c;
     if (s.objective.status !== 'pending') return;
-    const o = c.scenarios[s.scenario].objective;
+    const o = objectiveOf(c.scenarios[s.scenario], rulesOf(s));
     let won = false, deadline = Infinity;
     switch (o.kind) {
       case 'visitors': won = s.visitors.length >= o.count && s.rating >= o.minRating; deadline = o.byDay; break;
