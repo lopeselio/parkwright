@@ -227,20 +227,20 @@ function surroundings(s: ParkState, v: Visitor, counts: Crowd) {
 /** At a tile centre: decide where to step next. */
 function chooseStep(s: ParkState, c: Content, routes: Routes, v: Visitor) {
   // Arrived at a venue's access tile?
+  let goalRide: Ride | undefined;
   if (v.goal?.kind === 'ride') {
-    const r = s.rides.find((x) => x.id === (v.goal as { ride: number }).ride);
-    if (!r) { v.goal = null; }
-    else if (Routes.dist(s, routes.toRide(r), v.tx, v.ty) === 0) { arriveAt(s, c, v, r); return; }
+    const id = v.goal.ride;
+    goalRide = s.rides.find((x) => x.id === id);
+    if (!goalRide) { v.goal = null; }
+    else if (Routes.dist(s, routes.toRide(goalRide), v.tx, v.ty) === 0) { arriveAt(s, c, v, goalRide); return; }
   }
   if (v.goal?.kind === 'exit' && v.tx === s.gate[0] && v.ty === s.gate[1]) {
     v.mode = 'gone';
     return;
   }
   let field: Int32Array | null = null;
-  if (v.goal?.kind === 'ride') {
-    const r = s.rides.find((x) => x.id === (v.goal as { ride: number }).ride)!;
-    field = routes.toRide(r);
-  } else if (v.goal?.kind === 'exit') field = routes.toExit();
+  if (v.goal?.kind === 'ride') field = routes.toRide(goalRide!);
+  else if (v.goal?.kind === 'exit') field = routes.toExit();
   if (!isPath(s, v.tx, v.ty)) {
     // The path was removed under them: walk them back to the gate.
     v.tx = v.nx = s.gate[0];

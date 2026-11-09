@@ -104,6 +104,8 @@ export class Routes {
   private version = -1;
   private state: ParkState | null = null;
   private fields = new Map<string, Int32Array>();
+  /** Ride fields by id too, so the hot path skips building a string key. Cleared with `fields`. */
+  private rideFields = new Map<number, Int32Array>();
 
   constructor(private s: () => ParkState) {}
 
@@ -112,6 +114,7 @@ export class Routes {
     // A loaded save can share a mapVersion with the old one, so also key on the state object.
     if (s.mapVersion !== this.version || s !== this.state) {
       this.fields.clear();
+      this.rideFields.clear();
       this.version = s.mapVersion;
       this.state = s;
     }
@@ -144,7 +147,10 @@ export class Routes {
   }
 
   toRide(r: Ride) {
-    return this.field(`r${r.id}`, () => accessTiles(this.s(), r));
+    this.ensure();
+    let f = this.rideFields.get(r.id);
+    if (!f) { f = this.field(`r${r.id}`, () => accessTiles(this.s(), r)); this.rideFields.set(r.id, f); }
+    return f;
   }
 
   toExit() {
