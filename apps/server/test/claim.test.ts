@@ -121,4 +121,19 @@ describe('claiming a park', () => {
     const r = await post(`/api/parks/${p.id}/claim`, { signed: signed('dave.testnet', p.id), nonce: ch.body.nonce }, p.key);
     expect(r).toEqual({ status: 200, body: { id: p.id, owner: 'dave.testnet' } });
   }, 30_000);
+
+  it('live review: a park registered a moment ago (views still lag) is claimable', async () => {
+    const p = await publish(46);
+    // The settler registered it, but the finalized view doesn't show it yet.
+    owners.set(p.id, 'admin.testnet');
+    const lagging = chain.parkOwner;
+    chain.parkOwner = async (id) => (id === p.id && !assigned.some(([a]) => a === id) ? null : lagging(id));
+    const registerPark = chain.registerPark;
+    chain.registerPark = async () => { throw new Error('Smart contract panicked: that park is already registered'); };
+    try {
+      const ch = await post(`/api/parks/${p.id}/claim/challenge`, {}, p.key);
+      const r = await post(`/api/parks/${p.id}/claim`, { signed: signed('erin.testnet', p.id), nonce: ch.body.nonce }, p.key);
+      expect(r).toEqual({ status: 200, body: { id: p.id, owner: 'erin.testnet' } });
+    } finally { chain.parkOwner = lagging; chain.registerPark = registerPark; }
+  }, 30_000);
 });
