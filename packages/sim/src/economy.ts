@@ -1,5 +1,5 @@
 import type { Content, Ratings } from '@parkwright/content';
-import { DAYS_PER_SEASON, type Ledger, type LedgerCategory, type ParkState, type Ride } from './types.ts';
+import { DAYS_PER_SEASON, rulesOf, type Ledger, type LedgerCategory, type ParkState, type Ride } from './types.ts';
 
 export const emptyLedger = (): Ledger => ({
   construction: 0, upkeep: 0, wages: 0, stock: 0, marketing: 0, interest: 0,
@@ -97,6 +97,12 @@ export function computeRating(s: ParkState, c: Content): number {
   return Math.max(0, Math.min(1000, r));
 }
 
+/** Rules v2: each this many points of ride draw adds the base arrival rate again. */
+export const ARRIVAL_DRAW = 40;
+/** Rules v2: word of mouth. Arrivals start at AWARE_START/AWARE_FULL of demand and reach it after AWARE_FULL − AWARE_START visitors. */
+export const AWARE_START = 1000;
+export const AWARE_FULL = 6000;
+
 /** Expected arrivals per day. */
 export function arrivalRate(s: ParkState, c: Content): number {
   let rate = 10 + s.rating / 6;
@@ -104,7 +110,14 @@ export function arrivalRate(s: ParkState, c: Content): number {
   for (const r of s.rides) if (r.status === 'open') draw += c.rideTypes[r.type].draw;
   let here = 0;
   for (const v of s.visitors) if (v.mode !== 'gone') here++;
-  if (here > draw * 3) rate /= 3;
+  if (rulesOf(s) >= 2) {
+    // v2: what's on offer drives demand, word of mouth builds with every visitor so far, and a park
+    // holds four to five visitors per point of draw before word gets round that it's packed.
+    rate *= 1 + draw / ARRIVAL_DRAW;
+    rate *= Math.min(1, (AWARE_START + s.totalVisitors) / AWARE_FULL);
+    if (here > draw * 5.5) rate /= 3;
+    else if (here > draw * 4) rate /= 1.6;
+  } else if (here > draw * 3) rate /= 3;
   else if (here > draw * 2) rate /= 1.6;
   const vfm = valueForMoney(s);
   if (s.fee > vfm) rate /= 2;
