@@ -7,6 +7,7 @@ import type { Cache, Layered } from './cache.ts';
 import { ConflictError, validId, type ParkDoc, type Store } from './store.ts';
 import type { Settler } from './settle.ts';
 import { modsFor, type Verifier } from './verify.ts';
+import { handleClaim, type ClaimChain } from './claim.ts';
 
 export const MAX_BODY = 1_800_000; // under Cosmos' 2 MB item limit
 const WRITES_PER_MIN = 30;
@@ -28,6 +29,8 @@ export interface Deps {
   chainPark?: (parkId: string) => Promise<unknown>;
   /** Replays published parks; only verified ones rank or settle. */
   verifier?: Verifier;
+  /** Claiming parks on NEAR (absent without chain keys). */
+  claim?: ClaimChain;
 }
 
 /** After a save lands: verify it by replay, then (only if it matches) rank it — by the REPLAYED numbers — and queue it for settlement. */
@@ -161,6 +164,15 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     return true;
   }
 
+  const claimMatch = path.match(/^\/api\/parks\/([^/]+)\/claim(\/challenge)?$/);
+  if (claimMatch) {
+    if (!validId(claimMatch[1])) { json(res, 400, { error: 'bad park id' }); return true; }
+    return handleClaim(req, res, claimMatch[1], claimMatch[2] ? 'challenge' : 'claim', {
+      store, cache: deps.cache, verifier: deps.verifier, claim: deps.claim, ownerOk, json,
+      readJson: async (r) => JSON.parse(await readBody(r)),
+    });
+  }
+
   const chainMatch = path.match(/^\/api\/parks\/([^/]+)\/chain$/);
   if (chainMatch && req.method === 'GET') {
     const id = chainMatch[1];
@@ -170,7 +182,9 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     let body = await cache.get(`chain:${id}`).catch(() => null);
     const from = body ? 'l2' : 'rpc';
     if (!body) {
-      body = JSON.stringify({ enabled: true, contract: CHAIN_CONTRACT, park: await deps.chainPark!(id).catch(() => null) });
+      const park = (await deps.chainPark!(id).catch(() => null)) as { owner?: string } | null;
+      // `claimed`: a player owns it (the server holds unclaimed parks); `claimable`: this server can hand it over.
+      body = JSON.stringify({ enabled: true, contract: CHAIN_CONTRACT, park, claimed: !!park?.owner && park.owner !== deps.claim?.admin && !!deps.claim, claimable: !!deps.claim });
       await cache.set(`chain:${id}`, body, 20).catch(() => {});
     }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache', 'x-cache': from });
