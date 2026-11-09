@@ -66,7 +66,8 @@ export async function handleClaim(req: IncomingMessage, res: ServerResponse, id:
   if (nonce.length !== 32 || !(await d.claim.verifySignature(signed, id, nonce))) {
     json(res, 401, { error: 'the wallet signature does not check out (it must be signed with a full-access key of that account)' }); return true;
   }
-  if (d.verifier && !(await d.verifier.latest(id))?.result.ok) { json(res, 409, { error: 'only verified parks can be claimed: keep playing and save, then try again' }); return true; }
+  // The CURRENT save must replay exactly (not just some earlier version).
+  if (d.verifier && !(await d.verifier.verify(doc.id, doc.version, doc.save)).ok) { json(res, 409, { error: 'only verified parks can be claimed: keep playing and save, then try again' }); return true; }
 
   let owner = await d.claim.parkOwner(id);
   if (owner === null) { await d.claim.registerPark(id, doc.name).catch(() => {}); owner = await d.claim.parkOwner(id); }
@@ -77,7 +78,13 @@ export async function handleClaim(req: IncomingMessage, res: ServerResponse, id:
   try {
     await d.claim.assignPark(id, signed.accountId);
   } catch (e) {
-    json(res, 502, { error: `the claim transaction failed: ${String((e as Error).message ?? e).slice(0, 160)}` }); return true;
+    // The transaction may have landed even though the call failed (an RPC timeout), or a concurrent
+    // claim may have won: the chain says which.
+    const now = await d.claim.parkOwner(id).catch(() => null);
+    if (now !== signed.accountId) {
+      json(res, now && now !== d.claim.admin ? 409 : 502, now && now !== d.claim.admin ? { error: 'this park has already been claimed', owner: now } : { error: `the claim transaction failed: ${String((e as Error).message ?? e).slice(0, 160)}` });
+      return true;
+    }
   }
   await cache.del(`chain:${id}`).catch(() => {});
   json(res, 200, { id, owner: signed.accountId });
