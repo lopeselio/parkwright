@@ -44,6 +44,15 @@ if (shared) {
   onboarding.launch();
 }
 
+// Camera buttons (shown on touch screens, where there are no Q/E/R keys).
+$('#cam').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cam]');
+  if (!b) return;
+  if (b.dataset.cam === 'left') world.rotate(-1);
+  else if (b.dataset.cam === 'right') world.rotate(1);
+  else tools.rotate();
+});
+
 // Agents and the AI layer register extra terminal commands on this hook.
 (window as unknown as { parkwright: unknown }).parkwright = { game, world, terminal, tools };
 
