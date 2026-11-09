@@ -70,7 +70,14 @@ export async function handleClaim(req: IncomingMessage, res: ServerResponse, id:
   if (d.verifier && !(await d.verifier.verify(doc.id, doc.version, doc.save)).ok) { json(res, 409, { error: 'only verified parks can be claimed: keep playing and save, then try again' }); return true; }
 
   let owner = await d.claim.parkOwner(id);
-  if (owner === null) { await d.claim.registerPark(id, doc.name).catch(() => {}); owner = await d.claim.parkOwner(id); }
+  if (owner === null) {
+    // Not on chain yet (or registered a moment ago: views read finalized state, a couple of blocks behind
+    // the transaction). Only the admin can register, and a registered park starts as the admin's, so either
+    // way it's the admin's now; assign_park re-checks ownership on chain before handing it over.
+    try { await d.claim.registerPark(id, doc.name); }
+    catch (e) { if (!/already registered/.test(String((e as Error).message ?? e))) { json(res, 502, { error: 'could not register the park on NEAR; try again in a minute' }); return true; } }
+    owner = d.claim.admin;
+  }
   if (owner !== d.claim.admin) {
     json(res, 409, owner === signed.accountId ? { error: 'you already own this park', owner } : { error: 'this park has already been claimed', owner });
     return true;
