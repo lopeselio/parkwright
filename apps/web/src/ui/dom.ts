@@ -18,6 +18,7 @@ export function toast(msg: string, kind: 'ok' | 'err' = 'ok', hint?: string) {
   const el = $('#toast');
   el.className = `toast show ${kind}`;
   el.replaceChildren(h('div', {}, msg), hint ? h('div', { class: 'hint' }, hint) : '');
+  dispatchEvent(new CustomEvent('pw:toast', { detail: kind }));
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => el.classList.remove('show'), kind === 'err' ? 4200 : 2200);
 }
