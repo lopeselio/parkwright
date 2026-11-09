@@ -1,6 +1,7 @@
 // First-run experience: a title screen (continue / new park with scenario + name), a short welcome,
 // a hands-on walkthrough that waits for you to actually do each thing, and a "How to play" sheet that's
 // always one click (or "?") away. Plain DOM, like the rest of the HUD.
+import type { Cloud } from '../cloud.ts';
 import type { Game } from '../game.ts';
 import type { World } from '../render/world.ts';
 import type { Tools } from './tools.ts';
@@ -34,7 +35,7 @@ export class Onboarding {
   private tourTimer = 0;
   private tourFrame = 0;
 
-  constructor(private game: Game, private tools: Tools, private world: World) {
+  constructor(private game: Game, private tools: Tools, private world: World, private cloud: Cloud) {
     addEventListener('pw:help', () => this.help());
   }
 
@@ -63,12 +64,23 @@ export class Onboarding {
       const f = Array.from(el.querySelectorAll<HTMLElement>('button:not([disabled]), input, [tabindex="0"]'));
       if (!f.length) return;
       const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      if (!el.contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
     document.body.append(overlay);
     this.modal = overlay;
-    requestAnimationFrame(() => (el.querySelector<HTMLElement>('[data-autofocus]') ?? el.querySelector<HTMLElement>('button'))?.focus());
+    // If focus ever drops to <body> (a re-rendered dialog), keys still belong to the dialog.
+    const refocus = (e: KeyboardEvent) => {
+      if (this.modal !== overlay) { removeEventListener('keydown', refocus, true); return; }
+      if (overlay.contains(document.activeElement)) return;
+      if (e.key === 'Escape' && opts.onEsc) { e.preventDefault(); e.stopPropagation(); opts.onEsc(); return; }
+      focusIn();
+      if (e.key === 'Enter' || e.key === ' ') e.preventDefault();
+    };
+    addEventListener('keydown', refocus, true);
+    const focusIn = () => (el.querySelector<HTMLElement>('[data-autofocus]') ?? el.querySelector<HTMLElement>('button'))?.focus();
+    focusIn();
   }
 
   private close(resume = true) {
@@ -76,10 +88,11 @@ export class Onboarding {
     this.modal.remove();
     this.modal = null;
     if (resume) {
-      if (this.pausedFrom !== null) this.game.speed = this.pausedFrom || 1;
+      if (this.pausedFrom !== null) this.game.speed = this.pausedFrom;
       this.pausedFrom = null;
+      // Back to the canvas — never to the button that opened us, or Space/Enter would click it again.
       const back = this.lastFocus as HTMLElement | null;
-      (back && document.contains(back) ? back : $('#view')).focus();
+      (back && document.contains(back) && back.matches('input, textarea, .xterm-helper-textarea') ? back : $('#view')).focus();
     }
   }
 
@@ -90,7 +103,8 @@ export class Onboarding {
     const fresh = s.tick < 60 && s.rides.length === 0;
     const afterwards = () => { this.close(); if (!readSeen().welcomed) this.welcome(); };
     const panel = h('div', { class: 'ob-title' });
-    const menu = () => panel.replaceChildren(
+    let escClose = false;
+    const menu = () => { escClose = false; panel.replaceChildren(
       h('div', { class: 'ob-logo' }, h('span', { class: 'ob-flag', 'aria-hidden': 'true' }, '🎡'), h('h1', {}, 'Parkwright')),
       h('p', { class: 'ob-tag' }, 'Lay the paths, raise the rides, keep the crowds happy.'),
       h('div', { class: 'ob-menu' },
@@ -99,8 +113,9 @@ export class Onboarding {
         h('button', { class: 'big', onclick: () => { this.close(false); this.help(true); } }, 'How to play', h('small', {}, 'rules, controls, the terminal')),
       ),
       h('p', { class: 'ob-foot' }, 'Saved in this browser as you play. Publish from the Parks panel to share a park or rank it.'),
-    );
+    ); requestAnimationFrame(() => panel.querySelector<HTMLElement>('[data-autofocus]')?.focus()); };
     const newPark = () => {
+      escClose = view === 'new';
       const scen = Object.values(this.game.content.scenarios);
       let pick = scen[0]?.id ?? 'meadow';
       const name = h('input', { id: 'ob-name', maxlength: 32, value: 'Meadowbrook', 'aria-label': 'Park name', 'data-autofocus': true }) as HTMLInputElement;
@@ -113,6 +128,7 @@ export class Onboarding {
       });
       const start = () => {
         const n = name.value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 32) || 'My Park';
+        this.cloud.forget(); // the new park replaces your saved one, so it must not sync over the old one's link
         this.game.newGame(pick, n);
         this.focusGate();
         afterwards();
@@ -122,13 +138,16 @@ export class Onboarding {
         h('h2', {}, 'New park'),
         h('div', { class: 'ob-scens', role: 'group', 'aria-label': 'Scenario' }, ...cards),
         h('label', { class: 'ob-field', for: 'ob-name' }, 'Name your park', name),
-        fresh ? '' : h('p', { class: 'ob-warn' }, `This replaces ${s.name} in this browser. Publish it from the Parks panel first if you want to keep it.`),
-        h('div', { class: 'ob-row' }, h('button', { onclick: menu }, 'Back'), h('button', { class: 'primary', onclick: start }, 'Open the gates')),
+        this.game.visiting ? h('p', { class: 'ob-warn' }, 'This starts a park of your own and replaces your saved park in this browser.')
+          : fresh ? '' : h('p', { class: 'ob-warn' }, this.cloud.link
+            ? `This replaces ${s.name} in this browser. Its published copy stays online but stops updating.`
+            : `This replaces ${s.name} in this browser. Publish it from the Parks panel first if you want to keep it.`),
+        h('div', { class: 'ob-row' }, h('button', { onclick: () => (view === 'new' ? this.close() : menu()) }, 'Back'), h('button', { class: 'primary', onclick: start }, 'Open the gates')),
       );
       requestAnimationFrame(() => name.focus());
     };
     if (view === 'new') newPark(); else menu();
-    this.open(panel, { label: 'Parkwright', full: true, onEsc: view === 'new' ? () => this.close() : undefined });
+    this.open(panel, { label: 'Parkwright', full: true, onEsc: () => { if (escClose) this.close(); else if (panel.querySelector('#ob-name')) menu(); } });
   }
 
   private focusGate() {
@@ -185,12 +204,12 @@ export class Onboarding {
       { title: 'Pick the Path tool', body: 'Everything starts with paths. Choose Path in the toolbar.', target: q('[data-tour="path"]'), done: () => this.tools.tool.kind === 'path' },
       { title: 'Lay a path from the gate', body: 'The camera is on the gate. Click and drag across the grass to lay a few path tiles that join the gate’s path. Q/E turn the view, the wheel zooms, WASD pans.', enter: () => { base = pathCount(g); this.focusGate(); }, done: () => pathCount(g) >= base + 3 },
       { title: 'Open the Rides drawer', body: 'Now give them something to do.', target: q('[data-tour="ride"]'), done: () => !!document.querySelector('#drawer.open') },
-      { title: 'Place a ride', body: 'Pick a ride, then click beside your path. Press R to turn it until its entrance (the small square) touches the path. Red means it can’t go there.', target: () => document.querySelector('[data-tour="ride"].on') ? document.querySelector('#drawer.open') : document.querySelector('[data-tour="ride"]'), enter: () => { base = rideCount(g, ['flat', 'coaster']); }, done: () => rideCount(g, ['flat', 'coaster']) > base },
+      { title: 'Place a ride', body: 'Pick a ride, then click beside your path. Press R to turn it until its entrance (the small square) touches the path. Red means it can’t go there.', target: () => document.querySelector('[data-tour="ride"].on') ? document.querySelector('#drawer.open') : document.querySelector('[data-tour="ride"]'), enter: () => { base = rideCount(g, ['flat', 'track']); }, done: () => rideCount(g, ['flat', 'track']) > base },
       { title: 'Feed them', body: 'Visitors get hungry and thirsty. Open Stalls and place one along the path the same way.', target: () => document.querySelector('[data-tour="stall"].on') ? document.querySelector('#drawer.open') : document.querySelector('[data-tour="stall"]'), enter: () => { base = rideCount(g, ['stall']); }, done: () => rideCount(g, ['stall']) > base },
       { title: 'Inspect what you built', body: 'Click anything you built (with Inspect, or right after placing it) to open its panel: set the price, open or close it, and see how visitors rate it. A ride whose entrance doesn’t touch a path stays closed.', target: () => document.querySelector('#side.open') ?? document.querySelector('[data-tour="select"]') },
       { title: 'Let time run', body: 'Visitors trickle in during the day. Space pauses, and 2× or 4× speeds things up. Watch the rating climb as they enjoy your rides.', target: q('#top .speeds'), done: () => g.speed > 1 },
       { title: 'Money matters', body: 'Finance has your entry fee, loan and marketing campaigns, plus a chart of what each day earned. Staff hires mechanics and handymen.', target: q('#top [data-tour="finance"]') },
-      { title: 'The park terminal', body: 'Everything you click is also a command. Open the terminal with ` and try “help”, “map” or “ride place carousel”. You can ask the private AI for a mod (“mod ai …”) or let Claude build over MCP (“bridge”).', target: q('#top .term-btn') },
+      { title: 'The park terminal', body: 'Everything you click is also a command. Open the terminal with ` and try “help”, “map” or “ride place carousel”. Ask the private AI to manage (ask "…") or design a mod (“mod ai …”) or let Claude build over MCP (“bridge”).', target: q('#top .term-btn') },
       { title: 'That’s the basics', body: 'Grow the park, hit the goal, then publish it from Parks to share it and rank it. Press ? any time to see the rules and controls again.', target: q('#top [data-tour="help"]') },
     ];
     let i = 0;
@@ -214,7 +233,7 @@ export class Onboarding {
       );
     };
     const next = () => { if (i >= steps.length - 1) { this.endTour(true); return; } i++; show(); };
-    this.tourTimer = window.setInterval(() => { if (steps[i].done?.()) next(); }, 300);
+    this.tourTimer = window.setInterval(() => { if (!this.modal && steps[i].done?.()) next(); }, 300);
     const place = () => {
       this.tourFrame = requestAnimationFrame(place);
       const t = steps[i].target?.();
@@ -229,7 +248,7 @@ export class Onboarding {
       }
       const cw = card.offsetWidth, ch = card.offsetHeight;
       let x: number, y: number;
-      if (narrow) { x = 8; y = 80; }
+      if (narrow) { x = 8; y = r && r.top > innerHeight / 2 ? 80 : innerHeight - ch - 96; }
       else if (!r || r.width === 0) { x = (innerWidth - cw) / 2; y = innerHeight - ch - 60; }
       else if (r.right + 16 + cw < innerWidth) { x = r.right + 16; y = r.top; }
       else if (r.bottom + 16 + ch < innerHeight) { x = r.left; y = r.bottom + 16; }
@@ -257,7 +276,7 @@ export class Onboarding {
     const keys: [string, string][] = [
       ['Click / drag', 'build with the chosen tool; drag paths and scenery'],
       ['R', 'rotate what you’re placing'], ['Q / E', 'turn the camera'], ['WASD / arrows', 'pan'], ['Wheel / pinch', 'zoom'],
-      ['Space', 'pause / resume'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
+      ['Space', 'pause / resume'], ['Touch', 'tap to build, drag to lay paths; ❚❚ in the top bar pauses'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
     ];
     const sec = (title: string, ...kids: (Node | string)[]) => h('section', {}, h('h3', {}, title), ...kids);
     const panel = h('div', { class: 'ob-sheet' },
@@ -281,7 +300,7 @@ export class Onboarding {
         sec('Controls', h('dl', { class: 'ob-keys' }, ...keys.flatMap(([k, v]) => [h('dt', {}, h('kbd', {}, k)), h('dd', {}, v)]))),
         sec('Terminal, AI and NEAR', h('ul', {},
           h('li', {}, 'Press ` to open the terminal. “help” lists commands, and each button in the game has a command too.'),
-          h('li', {}, '“ai <goal>” lets the private NEAR AI manager play a few turns, with signed proofs. “mod ai <idea>” designs a data-only mod.'),
+          h('li', {}, 'ask "<goal>" lets the private NEAR AI manager play a few turns, with signed proofs (“ai proofs” downloads them). “mod ai <idea>” designs a data-only mod.'),
           h('li', {}, '“bridge” connects Claude Code over MCP. Running locally, “claude” opens it right inside the game.'),
           h('li', {}, 'Publish from Parks. The server replays every action to verify your park, and only verified parks rank and earn on NEAR testnet.'))),
       ),
