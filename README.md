@@ -20,6 +20,7 @@ Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 2
 Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEAR account (`p0`–`p7.parkwright.testnet`), whose only key can call `settle_day` and nothing else. When a park syncs to the cloud, each agent settles its visitors' spend for every finished day into the park, on the contract `park.parkwright.testnet`.
 
 - Do: open the game, build a ride, press **Parks → Publish & share**, and let two in-game days pass. See: the Parks panel shows "On NEAR testnet" with the credits settled into your park, and a link to the contract on NearBlocks.
+- Do: `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard.
 - Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract.
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
 - Setup (once, by the owner): `cargo near deploy …` (see DESIGN §9), then `pnpm --filter @parkwright/chain setup:patrons`.
