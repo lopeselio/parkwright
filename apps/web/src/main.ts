@@ -51,6 +51,7 @@ $('#cam').addEventListener('click', (e) => {
   if (b.dataset.cam === 'left') world.rotate(-1);
   else if (b.dataset.cam === 'right') world.rotate(1);
   else tools.rotate();
+  canvas.focus(); // so Space or Enter afterwards goes to the game, not back to this button
 });
 
 // Agents and the AI layer register extra terminal commands on this hook.
