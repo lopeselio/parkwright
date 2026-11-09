@@ -12,6 +12,7 @@ export class Hud {
   private panel: 'finance' | 'visitors' | 'staff' | 'parks' | null = null;
   private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
   private chain: Awaited<ReturnType<Cloud['chain']>> = null;
+  private verification: Awaited<ReturnType<Cloud['verification']>> = null;
   private last = '';
 
   constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void, private cloud: Cloud) {
@@ -50,6 +51,7 @@ export class Hud {
             if (this.panel === 'parks') {
               void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
               void this.cloud.chain().then((c) => { this.chain = c; this.renderSide(); });
+              void this.cloud.verification().then((v) => { this.verification = v; this.renderSide(); });
             }
           } }, p[0].toUpperCase() + p.slice(1))),
           h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
@@ -150,7 +152,7 @@ export class Hud {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
-    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|${this.chain?.park?.earned ?? ''}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
+    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|${this.chain?.park?.earned ?? ''}|${this.verification?.verified ?? ''}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
     if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
@@ -240,6 +242,8 @@ export class Hud {
           } catch (e) { toast((e as Error).message, 'err'); }
           this.renderSide();
         } }, link ? 'Copy share link' : 'Publish & share')),
+        link && this.verification ? h('p', { class: this.verification.verified ? 'verified' : 'muted' },
+          this.verification.verified ? '✓ Verified: the server replayed every action and got exactly your park — it ranks and settles on NEAR.' : `Not verified yet: ${this.verification.reason}. Unverified parks don't rank or settle.`) : '',
         this.chain?.enabled && this.chain.park ? h('div', { class: 'chain' },
           h('h4', {}, 'On NEAR testnet'),
           h('p', { class: 'muted' }, `Visitors arrive in 8 groups, each paid for by an agent with its own NEAR account and a daily spending cap. Every finished day, each agent settles what its visitors spent into your park.`),

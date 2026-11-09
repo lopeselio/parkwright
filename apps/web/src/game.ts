@@ -6,8 +6,8 @@ const SAVE_KEY = 'parkwright.save.v1';
 /** A park you're visiting autosaves here, so your own park's save is never touched. */
 const VISIT_KEY = 'parkwright.save.v1.visit';
 const BACKUP_KEY = 'parkwright.save.v1.backup';
-/** Keep the newest actions only; the snapshot already holds the result of older ones. */
-const MAX_LOG = 5000;
+/** The full action log is kept (the server replays it to verify a published park); past this it's trimmed. */
+const MAX_LOG = 50_000;
 const MODS_KEY = 'parkwright.mods.v1';
 
 export interface SaveFile {
@@ -18,6 +18,8 @@ export interface SaveFile {
   savedAt: number;
   /** Mods the park was built with (data only), so anyone opening it gets the same content. */
   mods?: ModFile[];
+  /** True when `log` holds every action since the park was created, so the server can verify it by replay. */
+  fullLog?: boolean;
 }
 
 /** Owns the simulation, its clock and the save. */
@@ -27,6 +29,9 @@ export class Game {
   private acc = 0;
   private listeners: ((e: ParkEvent) => void)[] = [];
   private unsub: () => void = () => {};
+
+  /** Whether this park's log goes back to its creation (new parks: yes; a trimmed or legacy save: no). */
+  private fullLog = true;
 
   /** Loaded mods, in order. Content = base pack + these. */
   mods: ModFile[] = [];
@@ -109,6 +114,7 @@ export class Game {
   newGame(scenario: string, name: string) {
     this.park = Park.create(this.content, scenario, (Math.random() * 2 ** 31) | 0, name);
     this.park.hooks = this.hooks();
+    this.fullLog = true;
     this.wire();
     this.saveLocal();
   }
@@ -140,6 +146,7 @@ export class Game {
     if (why) throw new Error(why);
     this.park = new Park(structuredClone(save.snapshot), this.content);
     this.park.hooks = this.hooks();
+    this.fullLog = save.fullLog === true;
     this.park.log.splice(0, this.park.log.length, ...save.log.slice(-MAX_LOG));
     this.wire();
   }
@@ -174,7 +181,8 @@ export class Game {
   }
 
   toSave(): SaveFile {
-    return { v: 1, snapshot: this.park.snapshot(), log: this.park.log.slice(-MAX_LOG), savedAt: Date.now(), ...(this.mods.length ? { mods: this.mods } : {}) };
+    const fullLog = this.fullLog && this.park.log.length <= MAX_LOG;
+    return { v: 1, snapshot: this.park.snapshot(), log: this.park.log.slice(-MAX_LOG), savedAt: Date.now(), fullLog, ...(this.mods.length ? { mods: this.mods } : {}) };
   }
 
   /** True while playing a copy of someone else's park. */
@@ -201,6 +209,7 @@ export class Game {
       const p = new Park(save.snapshot, this.content);
       p.log.splice(0, p.log.length, ...save.log.slice(-MAX_LOG));
       p.hooks = this.hooks();
+      this.fullLog = save.fullLog === true;
       return p;
     } catch { return null; }
   }
