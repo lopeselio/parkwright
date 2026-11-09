@@ -122,8 +122,9 @@ export class World {
 
     const tileGeo = new THREE.BoxGeometry(1, 0.06, 1);
     const n = st.w * st.h;
-    this.pathMesh = new THREE.InstancedMesh(tileGeo, mat('#d8c9a8'), n);
-    this.queueMesh = new THREE.InstancedMesh(tileGeo, mat('#9fb6cf'), n);
+    const paving = this.pavingTexture();
+    this.pathMesh = new THREE.InstancedMesh(tileGeo, new THREE.MeshStandardMaterial({ color: '#d8c9a8', map: paving, roughness: 0.9 }), n);
+    this.queueMesh = new THREE.InstancedMesh(tileGeo, new THREE.MeshStandardMaterial({ color: '#9fb6cf', map: paving, roughness: 0.85 }), n);
     for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; this.scene.add(m); }
     this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
     this.litterMesh.count = 0;
@@ -157,18 +158,52 @@ export class World {
   private sun: THREE.DirectionalLight;
 
   private grassMaterial(w: number, h: number) {
+    // The tile checker stays (it reads as a grid), with mown stripes and a scatter of darker and lighter tufts.
+    const px = 16;
     const cv = document.createElement('canvas');
-    cv.width = w * 8; cv.height = h * 8;
+    cv.width = w * px; cv.height = h * px;
     const ctx = cv.getContext('2d')!;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const v = ((x * 73856093) ^ (y * 19349663)) & 7;
+      const r = hash(x, y);
+      const v = r & 7;
       ctx.fillStyle = (x + y) % 2 ? `hsl(100 38% ${52 + v * 0.6}%)` : `hsl(98 40% ${50 + v * 0.6}%)`;
-      ctx.fillRect(x * 8, y * 8, 8, 8);
+      ctx.fillRect(x * px, y * px, px, px);
+      ctx.fillStyle = 'rgba(255,255,240,0.035)';
+      ctx.fillRect(x * px, y * px, px / 2, px);
+      for (let i = 0; i < 7; i++) {
+        const t = hash(r + i, i * 31 + y);
+        ctx.fillStyle = t & 1 ? 'rgba(40,70,20,0.13)' : 'rgba(235,245,190,0.12)';
+        ctx.fillRect(x * px + (t >>> 4) % (px - 2), y * px + (t >>> 9) % (px - 2), 2, 2);
+      }
     }
     const tex = new THREE.CanvasTexture(cv);
-    tex.magFilter = THREE.NearestFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
     return new THREE.MeshStandardMaterial({ map: tex, roughness: 1 });
+  }
+
+  /** Near-white flagstones (the material colour tints them): four slabs a tile, mortar lines, worn edges. */
+  private pavingTexture() {
+    const s = 64;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    const ctx = cv.getContext('2d')!;
+    ctx.fillStyle = '#c9c2b4';
+    ctx.fillRect(0, 0, s, s);
+    const slabs: [number, number, number, number][] = [[0, 0, 36, 28], [36, 0, 28, 28], [0, 28, 24, 36], [24, 28, 40, 36]];
+    slabs.forEach(([x, y, w, h], i) => {
+      ctx.fillStyle = `hsl(40 18% ${93 - i * 2.5}%)`;
+      ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+      for (let k = 0; k < 18; k++) {
+        const t = hash(i * 97 + k, k * 13);
+        ctx.fillStyle = t & 1 ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.06)';
+        ctx.fillRect(x + 2 + (t >>> 3) % (w - 5), y + 2 + (t >>> 8) % (h - 5), 2, 2);
+      }
+    });
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
+    return tex;
   }
 
   /** Procedural stand-ins for the props, used until (or if) scenery.glb loads. */
@@ -293,18 +328,28 @@ export class World {
 
   private syncTiles(st: ParkState) {
     const m = new THREE.Matrix4();
+    const c = this.tmp.c;
     const bins: THREE.Matrix4[] = [];
     let np = 0, nq = 0;
     for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
       const k = y * st.w + x;
       const t = st.tiles[k];
-      if (t === Tile.Path) { m.makeTranslation(x + 0.5, 0.03, y + 0.5); this.pathMesh.setMatrixAt(np++, m); }
-      else if (t === Tile.Queue) { m.makeTranslation(x + 0.5, 0.035, y + 0.5); this.queueMesh.setMatrixAt(nq++, m); }
+      // Each slab is turned a quarter at random and a shade lighter or darker, so paths don't look stamped.
+      const r = hash(x, y);
+      if (t === Tile.Path || t === Tile.Queue) {
+        m.makeRotationY((r & 3) * (Math.PI / 2)).setPosition(x + 0.5, t === Tile.Path ? 0.03 : 0.035, y + 0.5);
+        c.setScalar(0.94 + ((r >>> 4) & 15) / 150);
+        const im = t === Tile.Path ? this.pathMesh : this.queueMesh;
+        const i = t === Tile.Path ? np++ : nq++;
+        im.setMatrixAt(i, m);
+        im.setColorAt(i, c);
+      }
       if (st.bins[k]) bins.push(PropSet.at(x + 0.82, y + 0.82));
     }
     this.pathMesh.count = np; this.queueMesh.count = nq;
     for (const im of [this.pathMesh, this.queueMesh]) {
       im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
       im.computeBoundingSphere();
     }
     this.propSet('bin')?.set(bins);
