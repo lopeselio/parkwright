@@ -2,7 +2,7 @@ import type { Content } from '@parkwright/content';
 import { book } from './economy.ts';
 import { accessTiles, idx, isPath, queueCapacity, Routes, SCENERY } from './map.ts';
 import { chance, randInt, randRange } from './rng.ts';
-import { DX, DY, SUB, type Dir, type ParkState, type Ride, type Visitor } from './types.ts';
+import { DX, DY, rulesOf, SUB, type Dir, type ParkState, type Ride, type Visitor } from './types.ts';
 
 /** Walking visitors per tile, counted once at the start of a tick (rules v2+), or null to count on demand (v1). */
 export type Crowd = Uint16Array | null;
@@ -178,8 +178,17 @@ function stepNeeds(s: ParkState, v: Visitor) {
   if (v.litterIn > 0 && --v.litterIn === 0) dropLitter(s, v);
 }
 
+/** Rules v2: litter goes in any bin within this many tiles (a short walk), not just an adjacent one. */
+const BIN_REACH_V2 = 2;
+
 function dropLitter(s: ParkState, v: Visitor) {
   const k = idx(s, v.tx, v.ty);
+  if (rulesOf(s) >= 2) {
+    for (let y = v.ty - BIN_REACH_V2; y <= v.ty + BIN_REACH_V2; y++) for (let x = v.tx - BIN_REACH_V2; x <= v.tx + BIN_REACH_V2; x++)
+      if (x >= 0 && y >= 0 && x < s.w && y < s.h && s.bins[idx(s, x, y)]) return;
+    s.litter[k] = Math.min(9, s.litter[k] + 1);
+    return;
+  }
   for (let d = -1; d <= 4; d++) {
     const x = v.tx + (d < 0 ? 0 : DX[d]), y = v.ty + (d < 0 ? 0 : DY[d]);
     if (x >= 0 && y >= 0 && x < s.w && y < s.h && s.bins[idx(s, x, y)]) return;

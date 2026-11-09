@@ -2,7 +2,7 @@ import type { Content } from '@parkwright/content';
 import { idx, isPath, Routes } from './map.ts';
 import { chance, randInt } from './rng.ts';
 import { fixRide, inspectRide } from './rides.ts';
-import { DX, DY, SUB, type Dir, type ParkState, type Staff } from './types.ts';
+import { DX, DY, rulesOf, SUB, type Dir, type ParkState, type Staff } from './types.ts';
 
 const WALK = 3;
 const FIX_TICKS = 160;
@@ -73,11 +73,43 @@ function step(s: ParkState, routes: Routes, m: Staff) {
   if (m.role === 'handyman') {
     const dirty = opts.filter((d) => s.litter[idx(s, m.tx + DX[d], m.ty + DY[d])] > 0);
     if (dirty.length) { go(m, dirty[0]); return; }
+    if (rulesOf(s) >= 2) { const d = towardLitter(s, m); if (d !== null) { go(m, d); return; } }
   }
   const back = ((m.dir + 2) & 3) as Dir;
   const fwd = opts.filter((d) => d !== back);
   const pool = fwd.length ? fwd : opts;
   go(m, pool.includes(m.dir) && chance(s.rng, 2, 3) ? m.dir : pool[randInt(s.rng, pool.length)]);
+}
+
+/** Rules v2: handymen look down the paths for litter (breadth-first, a few tiles out) instead of stumbling on it. */
+const LITTER_SIGHT = 8;
+const seenBuf: number[] = [];
+const firstBuf: Dir[] = [];
+
+function towardLitter(s: ParkState, m: Staff): Dir | null {
+  // A BFS over path tiles from the handyman; each tile remembers the first step that led there.
+  // Scratch arrays are reused (their contents never outlive the call), so this is a pure function of the state.
+  const start = idx(s, m.tx, m.ty);
+  seenBuf.length = 0; firstBuf.length = 0;
+  seenBuf.push(start); firstBuf.push(0);
+  const seen = new Set<number>([start]);
+  let head = 0;
+  for (let depth = 0; depth < LITTER_SIGHT; depth++) {
+    const end = seenBuf.length;
+    for (; head < end; head++) {
+      const k = seenBuf[head], x = k % s.w, y = (k - x) / s.w;
+      for (let d = 0 as Dir; d < 4; d = (d + 1) as Dir) {
+        const nx = x + DX[d], ny = y + DY[d];
+        if (!isPath(s, nx, ny)) continue;
+        const nk = idx(s, nx, ny);
+        if (seen.has(nk)) continue;
+        const first = head === 0 ? d : firstBuf[head];
+        if (s.litter[nk] > 0) return first;
+        seen.add(nk); seenBuf.push(nk); firstBuf.push(first);
+      }
+    }
+  }
+  return null;
 }
 
 function go(m: Staff, d: Dir) {
