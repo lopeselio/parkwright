@@ -1,7 +1,7 @@
 import { baseContent as c } from '@parkwright/content';
 import { describe, expect, it } from 'vitest';
 import { nextU32, seedRng } from '../src/rng.ts';
-import { Park, TICKS_PER_DAY, findRide, refusal } from '../src/index.ts';
+import { Park, TICKS_PER_DAY, findRide, refusal, weeklyWage } from '../src/index.ts';
 import { breakDown } from '../src/rides.ts';
 
 /** A small working park: a path spine, a carousel, a pretzel cart, a lemonade stand and a restroom. */
@@ -145,7 +145,7 @@ describe('simulation', () => {
     const p = starter();
     p.run('staff.hire', { role: 'handyman' });
     p.advanceTo(TICKS_PER_DAY * 7);
-    expect(p.s.ledgerTotal.wages).toBe(-7 * Math.round(10000 / 7));
+    expect(p.s.ledgerTotal.wages).toBe(-7 * Math.round(weeklyWage(p.s, c, 'handyman') / 7));
     expect(p.s.ledgerTotal.upkeep).toBeLessThan(0);
     expect(p.s.ledgerTotal.interest).toBe(-Math.floor((1000000 * 800) / 10000 / 4));
   });
@@ -190,14 +190,14 @@ describe('review regressions', () => {
     p.run('staff.hire', { role: 'mechanic' });
     p.advanceTo(TICKS_PER_DAY * 6);
     p.run('staff.fire', { staff: 'mechanic 1' });
-    expect(p.s.ledgerTotal.wages).toBe(-6 * Math.round(16000 / 7));
+    expect(p.s.ledgerTotal.wages).toBe(-6 * Math.round(weeklyWage(p.s, c, 'mechanic') / 7));
   });
 
   it('shows weekly costs in the weekly ledger', () => {
     const p = starter();
     p.run('staff.hire', { role: 'handyman' });
     p.advanceTo(TICKS_PER_DAY * 3);
-    expect(p.s.ledgerWeek.wages).toBe(-3 * Math.round(10000 / 7));
+    expect(p.s.ledgerWeek.wages).toBe(-3 * Math.round(weeklyWage(p.s, c, 'handyman') / 7));
     expect(p.s.ledgerWeek.upkeep).toBeLessThan(0);
   });
 

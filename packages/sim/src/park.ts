@@ -1,7 +1,7 @@
 import type { Content } from '@parkwright/content';
 import { ACTIONS, checkParams, findRideType, type ActionResult, type Hook } from './actions.ts';
 import './coaster.ts'; // registers coaster.* actions
-import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues } from './economy.ts';
+import { arrivalRate, book, computeRating, emptyLedger, parkValue, refreshRideValues, weeklyWage } from './economy.ts';
 import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
 import { payUpkeep, updateRide, wearRide } from './rides.ts';
@@ -202,7 +202,7 @@ export class Park {
     // Running costs are charged daily (a seventh of the weekly rate) into today's stats,
     // so hiring and firing around payday can't dodge them.
     payUpkeep(s, c);
-    for (const st of s.staff) book(s, 'wages', -Math.round(c.staff[st.role].wage / 7));
+    for (const st of s.staff) book(s, 'wages', -Math.round(weeklyWage(s, c, st.role) / 7));
     refreshRideValues(s, c, beauty);
     s.rating = computeRating(s, c);
     s.visitors = s.visitors.filter((v) => v.mode !== 'gone');

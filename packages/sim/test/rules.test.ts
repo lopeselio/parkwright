@@ -1,6 +1,6 @@
 import { baseContent as c } from '@parkwright/content';
 import { describe, expect, it } from 'vitest';
-import { Park, RULES, rulesOf, stateHash, TICKS_PER_DAY, type ActionRecord } from '../src/index.ts';
+import { Park, RULES, rulesOf, stateHash, TICKS_PER_DAY, weeklyUpkeep, weeklyWage, type ActionRecord } from '../src/index.ts';
 import midV1 from './fixtures/v1-mid.json';
 import bigV1 from './fixtures/v1-big.json';
 
@@ -43,5 +43,15 @@ describe('rules versions', () => {
     }
     const fx = midV1 as Fixture;
     expect(Park.replay(c, fx.scenario, fx.seed, fx.log, fx.tick, fx.name).hash()).not.toBe(fx.hash);
+  });
+});
+
+describe('running costs by rules version', () => {
+  it('v1 charges the content wages and upkeep; v2 scales them up', () => {
+    const v1 = Park.create(c, 'meadow', 1, 'A', 1).s, v2 = Park.create(c, 'meadow', 1, 'B', 2).s;
+    expect(weeklyWage(v1, c, 'handyman')).toBe(c.staff.handyman.wage);
+    expect(weeklyUpkeep(v1, c, 'carousel')).toBe(c.rideTypes.carousel.upkeep);
+    expect(weeklyWage(v2, c, 'handyman')).toBeGreaterThan(c.staff.handyman.wage);
+    expect(weeklyUpkeep(v2, c, 'carousel')).toBeGreaterThan(c.rideTypes.carousel.upkeep);
   });
 });
