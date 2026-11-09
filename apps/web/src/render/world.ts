@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
@@ -74,14 +75,19 @@ export class World {
     this.scene.fog = new THREE.Fog('#bfe3f0', 60, 140);
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
 
-    const hemi = new THREE.HemisphereLight('#fff6e0', '#6a8a5a', 1.1);
+    // A soft studio environment (generated once, no download) so metal and gloss have something to reflect.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.35;
+    pmrem.dispose();
+    const hemi = new THREE.HemisphereLight('#fff6e0', '#6a8a5a', 0.65);
     const sun = new THREE.DirectionalLight('#fff1d6', 2.2);
     sun.position.set(-30, 50, -20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera;
-    sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.far = 200;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.camera.far = 200;
+    sun.shadow.bias = -0.0003;
+    sun.shadow.normalBias = 0.02;
     this.scene.add(hemi, sun, sun.target);
     this.sun = sun;
 
@@ -196,8 +202,30 @@ export class World {
     const d = 60;
     this.camera.position.set(this.target.x - Math.sin(this.yaw) * d * 0.7, d * 0.72, this.target.z + Math.cos(this.yaw) * d * 0.7);
     this.camera.lookAt(this.target);
-    this.sun.position.set(this.target.x - 30, 50, this.target.z - 20);
-    this.sun.target.position.copy(this.target);
+    this.placeSun();
+  }
+
+  private shadowExtent = 0;
+  private sunRot = new THREE.Matrix4().lookAt(new THREE.Vector3(-30, 50, -20), new THREE.Vector3(), new THREE.Vector3(0, 1, 0));
+  private sunInv = this.sunRot.clone().transpose();
+  private sunAt = new THREE.Vector3();
+
+  /** Fit the shadow map to what the camera shows, and move it in whole texels so shadows don't crawl when panning. */
+  private placeSun() {
+    const sc = this.sun.shadow.camera;
+    const ext = Math.round(Math.min(48, Math.max(10, this.zoom * 2.6)));
+    if (ext !== this.shadowExtent) {
+      this.shadowExtent = ext;
+      sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext;
+      sc.updateProjectionMatrix();
+    }
+    const texel = (2 * ext) / this.sun.shadow.mapSize.x;
+    const p = this.sunAt.copy(this.target).applyMatrix4(this.sunInv);
+    p.x = Math.round(p.x / texel) * texel;
+    p.y = Math.round(p.y / texel) * texel;
+    p.applyMatrix4(this.sunRot);
+    this.sun.position.set(p.x - 30, p.y + 50, p.z - 20);
+    this.sun.target.position.copy(p);
   }
 
   /** Pick the ground tile under a screen point. */
