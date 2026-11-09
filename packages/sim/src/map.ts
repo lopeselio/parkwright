@@ -1,4 +1,4 @@
-import { DX, DY, Tile, type Dir, type ParkState, type Ride } from './types.ts';
+import { DX, DY, rulesOf, Tile, type Dir, type ParkState, type Ride } from './types.ts';
 
 export const idx = (s: ParkState, x: number, y: number) => y * s.w + x;
 export const inBounds = (s: ParkState, x: number, y: number) => x >= 0 && y >= 0 && x < s.w && y < s.h;
@@ -60,8 +60,9 @@ export function queueChain(s: ParkState, r: Ride): [number, number][] {
   return out;
 }
 
+/** How many can wait for a ride: a few at the entrance (about a full load in rules v2) plus 8 per queue tile. */
 export function queueCapacity(s: ParkState, r: Ride): number {
-  return 6 + 8 * queueChain(s, r).length;
+  return (rulesOf(s) >= 2 ? 20 : 6) + 8 * queueChain(s, r).length;
 }
 
 /** Path tiles from which a visitor can step into the ride (directly or via its queue). */
