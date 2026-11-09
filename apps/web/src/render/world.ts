@@ -10,6 +10,18 @@ export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0
 
 const SHIRTS = ['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '#f08fc0', '#ffffff', '#3d5a80', '#ee964b'];
 const SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
+
+const accents = new Map<string, THREE.Material>();
+function accent(base: THREE.Material, color: string) {
+  const key = base.name + color;
+  let m = accents.get(key);
+  if (!m) {
+    m = base.clone();
+    (m as THREE.MeshStandardMaterial).color.set(color);
+    accents.set(key, m);
+  }
+  return m;
+}
 const MAX_PEOPLE = 4000;
 const MAX_STAFF = 200;
 
@@ -260,6 +272,11 @@ export class World {
         disposeTree(group);
         // Models are authored wide along x; a ride rotated to a tall footprint turns its model to match.
         if (t.model === 'wheel' && r.w < r.h) glb.rotation.y = Math.PI / 2;
+        // Parts painted "accent" in Blender take this ride's colour (each stall's awning and sign).
+        glb.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh && !Array.isArray(m.material) && m.material.name.startsWith('pw_accent')) m.material = accent(m.material, t.color);
+        });
         holder.add(glb);
         view.animate = (tt, run) => glb.userData.animate?.(tt, run);
       });
