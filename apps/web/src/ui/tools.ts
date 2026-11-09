@@ -30,6 +30,8 @@ export class Tools {
   onCommand: (line: string) => void = () => {};
 
   constructor(private game: Game, private world: World, canvas: HTMLCanvasElement) {
+    // A different park (new game, load, visit, home): drop whatever we were building in the old one.
+    game.onReplace(() => { this.lastPiece = 'straight'; if (this.tool.kind !== 'select') this.set({ kind: 'select' }); else this.previewPiece(null); });
     const ndc = (e: PointerEvent) => new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     let panning: { x: number; y: number } | null = null;
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -108,6 +110,7 @@ export class Tools {
   /** Run a coaster action from the builder panel. */
   coaster(type: string, params: Record<string, unknown>, cmd: string) {
     const r = this.exec(type, params, cmd);
+    if (r.ok && type === 'coaster.start') this.lastPiece = 'straight';
     if (r.ok && r.message) toast(r.message);
     if (r.ok && r.focus) this.world.focus(r.focus.x, r.focus.y);
     this.onChange();
