@@ -7,6 +7,7 @@ import { ClaudeTerminal } from './claude.ts';
 import { World } from './render/world.ts';
 import { Tools } from './ui/tools.ts';
 import { Hud } from './ui/hud.ts';
+import { Onboarding } from './ui/onboarding.ts';
 import { ParkTerminal } from './ui/terminal.ts';
 import { $, toast } from './ui/dom.ts';
 
@@ -29,6 +30,7 @@ const toggleTerminal = (open = !termHost.classList.contains('open')) => {
 };
 const cloud = new Cloud(game);
 new Hud(game, tools, () => toggleTerminal(), cloud);
+const onboarding = new Onboarding(game, tools, world);
 
 // ?park=<id> opens a shared park (yours resumes; anyone else's becomes a copy you play).
 const shared = new URLSearchParams(location.search).get('park');
@@ -37,6 +39,9 @@ if (shared) {
     .then((how) => toast(how === 'own' ? 'Welcome back to your park' : `Visiting ${game.s.name} — this is your own copy to play`))
     .catch((e: Error) => toast(e.message, 'err'))
     .finally(() => history.replaceState(null, '', location.pathname));
+} else if (!new URLSearchParams(location.search).has('play')) {
+  // The title screen (Continue / New park / How to play). ?play skips it (links, tests).
+  onboarding.launch();
 }
 
 // Agents and the AI layer register extra terminal commands on this hook.
@@ -44,8 +49,10 @@ if (shared) {
 
 const keys = new Set<string>();
 addEventListener('keydown', (e) => {
+  if (onboarding.blocking) return; // a dialog is open: it owns the keyboard
   if (e.key === '`') { toggleTerminal(); e.preventDefault(); return; }
   if (termHost.classList.contains('open') && termHost.contains(document.activeElement)) return;
+  if (e.key === '?') { onboarding.help(); e.preventDefault(); return; }
   if (e.key === 'Escape') tools.set({ kind: 'select' });
   if (e.key === 'r' || e.key === 'R') tools.rotate();
   if (e.key === 'q') world.rotate(-1);

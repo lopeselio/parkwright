@@ -40,13 +40,14 @@ export class Hud {
       this.topRefs = refs;
       $('#top').replaceChildren(
         h('div', { class: 'brand' }, h('b', {}, s.name), refs.date),
+        h('div', { class: 'stats', 'data-tour': 'stats' },
         h('div', { class: 'stat' }, h('label', {}, 'Cash'), refs.cash),
         h('div', { class: 'stat' }, h('label', {}, 'Rating'), h('div', { class: 'bar' }, refs.bar), refs.rating),
-        h('div', { class: 'stat' }, h('label', {}, 'Visitors'), refs.visitors),
+        h('div', { class: 'stat' }, h('label', {}, 'Visitors'), refs.visitors)),
         refs.save,
         h('div', { class: 'speeds' }, ...speeds),
         h('div', { class: 'menu' },
-          ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', onclick: () => {
+          ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', 'data-tour': p, onclick: () => {
             this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
             if (this.panel === 'parks') {
               void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
@@ -55,6 +56,7 @@ export class Hud {
             }
           } }, p[0].toUpperCase() + p.slice(1))),
           h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
+          h('button', { class: 'help-btn', 'data-tour': 'help', title: 'How to play (?)', 'aria-label': 'How to play', onclick: () => dispatchEvent(new Event('pw:help')) }, '?'),
         ),
         s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
       );
@@ -75,7 +77,7 @@ export class Hud {
 
   renderTools() {
     const t = this.tools.tool;
-    const btn = (id: string, label: string, on: boolean, click: () => void) => h('button', { class: `tool ${on ? 'on' : ''}`, title: label, onclick: click }, h('span', { class: 'ic' }, ICON[id]), h('span', {}, label));
+    const btn = (id: string, label: string, on: boolean, click: () => void) => h('button', { class: `tool ${on ? 'on' : ''}`, title: label, 'data-tour': id, onclick: click }, h('span', { class: 'ic' }, ICON[id]), h('span', {}, label));
     $('#tools').replaceChildren(
       btn('select', 'Inspect', t.kind === 'select', () => { this.drawer = null; this.tools.set({ kind: 'select' }); }),
       btn('path', 'Path', t.kind === 'path' && !t.queue, () => { this.drawer = null; this.tools.set({ kind: 'path', queue: false }); }),
