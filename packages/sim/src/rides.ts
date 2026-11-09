@@ -3,10 +3,13 @@ import { book } from './economy.ts';
 import { ejectQueue } from './actions.ts';
 import { chance, randInt } from './rng.ts';
 import { finishRide, leaveRide, pay, think } from './visitors.ts';
-import type { ParkState, Ride, Visitor } from './types.ts';
+import { rulesOf, type ParkState, type Ride, type Visitor } from './types.ts';
 
 /** How long a partial load waits for more riders before it runs anyway. */
 const LOAD_PATIENCE = 120;
+/** Rules v2: operators dispatch sooner and flat rides cycle faster, so a ride serves a bigger crowd. */
+const LOAD_PATIENCE_V2 = 60;
+const FLAT_CYCLE_V2 = 0.6;
 
 export function updateRide(s: ParkState, c: Content, r: Ride, byId: Map<number, import('./types.ts').Visitor>) {
   const t = c.rideTypes[r.type];
@@ -25,7 +28,8 @@ export function updateRide(s: ParkState, c: Content, r: Ride, byId: Map<number, 
   }
   if (r.status !== 'open' || r.queue.length === 0) { r.loadWait = 0; return; }
   r.loadWait++;
-  if (r.queue.length < t.capacity && r.loadWait < LOAD_PATIENCE) return;
+  const v2 = rulesOf(s) >= 2;
+  if (r.queue.length < t.capacity && r.loadWait < (v2 ? LOAD_PATIENCE_V2 : LOAD_PATIENCE)) return;
   r.loadWait = 0;
   const batch = r.queue.splice(0, t.capacity);
   for (const id of batch) {
@@ -39,7 +43,7 @@ export function updateRide(s: ParkState, c: Content, r: Ride, byId: Map<number, 
     v.mode = 'riding';
     r.riders.push(id);
   }
-  const cycle = t.kind === 'track' ? trackCycle(r) : t.cycleTicks;
+  const cycle = t.kind === 'track' ? trackCycle(r) : v2 && t.kind === 'flat' ? Math.round(t.cycleTicks * FLAT_CYCLE_V2) : t.cycleTicks;
   r.cycle = Math.max(1, cycle);
 }
 
