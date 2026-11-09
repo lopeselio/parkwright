@@ -22,6 +22,8 @@ Work in progress. See DESIGN.md.
   - **⟲ R ⟳** buttons in the bottom-right corner turn the view and rotate the piece you're placing.
   - On a desktop, right-drag also pans.
 
+- Do: click anywhere, build a path and a ride, and let time run. See (hear): a thunk for building, a tick for each path tile, a chime as visitors arrive, coins as they spend, a little tune when a ride starts, the chain clack and rush of a coaster run, and a crowd murmur that grows with the park. It's all synthesized in the browser (no audio files). **M**, or the 🔊 button under the top bar, mutes it and the setting is remembered.
+
 Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 24 40`, then `ride build teacups 21 34 --rot 1`, then `ride open teacups`. Visitors walk in from the gate and queue for the ride.
 
 ## Tests
