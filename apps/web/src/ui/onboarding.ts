@@ -6,6 +6,14 @@ import type { Game } from '../game.ts';
 import type { World } from '../render/world.ts';
 import type { Tools } from './tools.ts';
 import { $, h } from './dom.ts';
+import { goalText, objectiveOf, rulesOf } from '@parkwright/sim';
+import type { Scenario } from '@parkwright/content';
+
+/** "A flat meadow by the road. Goal: 1,000 visitors…" — the goal comes from the park's rules version. */
+function goalLine(sc: Scenario, rules?: number): string {
+  const o = objectiveOf(sc, rules);
+  return o.kind === 'sandbox' ? sc.blurb : `${sc.blurb} Goal: ${goalText(o)}.`;
+}
 
 const KEY = 'parkwright.onboarding.v1';
 interface Seen { welcomed?: boolean; toured?: boolean }
@@ -123,7 +131,7 @@ export class Onboarding {
         const b = h('button', { class: `ob-scen${sc.id === pick ? ' on' : ''}`, 'aria-pressed': String(sc.id === pick), onclick: () => {
           pick = sc.id;
           for (const c of cards) { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', String(c === b)); }
-        } }, h('b', {}, sc.name), h('small', {}, sc.blurb), h('span', { class: 'ob-cash' }, `${sc.size[0]}×${sc.size[1]} · starts with ${(sc.cash / 100).toLocaleString()} cr`));
+        } }, h('b', {}, sc.name), h('small', {}, goalLine(sc)), h('span', { class: 'ob-cash' }, `${sc.size[0]}×${sc.size[1]} · starts with ${(sc.cash / 100).toLocaleString()} cr`));
         return b;
       });
       const start = () => {
@@ -163,7 +171,7 @@ export class Onboarding {
       { art: '🎢', title: 'Build a park people love', body: 'Visitors walk in, ride, eat, and tell each other what they thought. Their mood becomes your park rating, and your rating brings more of them. Your job is to keep that loop going without running out of cash.' },
       { art: '🛤️', title: 'Paths come first', body: 'Everyone arrives at the gate and walks only on paths. A ride’s entrance, the small square, has to touch a path, or nobody can reach it. Queue tiles in front of a ride let more people wait in line.' },
       { art: '🍦', title: 'Rides, food and prices', body: 'Rides bring excitement, and stalls fix hunger and thirst. Click anything you built to set its price or open and close it. Hire mechanics for breakdowns and handymen for litter. Fees and marketing are in Finance.' },
-      { art: '🏁', title: sc?.objective?.kind === 'sandbox' ? 'No goal, just build' : 'Your goal', body: `${sc?.blurb ?? ''} When you’re ready, you can build a coaster piece by piece, open the terminal with \` to type commands or ask the AI for a mod, and publish your park. Published parks are checked by replay and earn on NEAR testnet.` },
+      { art: '🏁', title: sc?.objective?.kind === 'sandbox' ? 'No goal, just build' : 'Your goal', body: `${sc ? goalLine(sc, rulesOf(this.game.s)) : ''} When you’re ready, you can build a coaster piece by piece, open the terminal with \` to type commands or ask the AI for a mod, and publish your park. Published parks are checked by replay and earn on NEAR testnet.` },
     ];
     let i = 0;
     const panel = h('div', { class: 'ob-card' });
@@ -282,7 +290,7 @@ export class Onboarding {
     const panel = h('div', { class: 'ob-sheet' },
       h('header', {}, h('h2', {}, 'How to play'), h('button', { class: 'x', 'aria-label': 'Close', onclick: () => done() }, '×')),
       h('div', { class: 'ob-cols' },
-        sec('Goal', h('p', {}, sc?.blurb ?? 'Build the best park you can.'), h('p', {}, 'Your rating (0–1000) comes from how happy visitors are, how good your rides are, how clean the park is, and whether it’s worth the money.')),
+        sec('Goal', h('p', {}, sc ? goalLine(sc, rulesOf(this.game.s)) : 'Build the best park you can.'), h('p', {}, 'Your rating (0–1000) comes from how happy visitors are, how good your rides are, how clean the park is, and whether it’s worth the money.')),
         sec('Building',
           h('ul', {},
             h('li', {}, 'Paths connect everything to the gate. Ride and stall entrances must touch a path.'),
