@@ -52,7 +52,12 @@ function stressRun(sizes: number[]) {
   for (const n of sizes) {
     const p = big({ rules, seed }).park;
     p.advanceTo(TICKS_PER_DAY);
-    const fill = () => { while (here(p.s) < n) if (!spawnVisitor(p.s, p.c)) break; };
+    // Hold the crowd at n: the gate fee is out of everyone's reach except while we let people in.
+    const fill = () => {
+      p.s.fee = 0;
+      for (let k = here(p.s); k < n; k++) if (!spawnVisitor(p.s, p.c)) break;
+      p.s.fee = 10000;
+    };
     fill();
     p.advanceTo(2 * TICKS_PER_DAY); // let them spread out over the paths
     fill();
