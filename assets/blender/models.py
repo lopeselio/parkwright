@@ -357,15 +357,17 @@ def scenery():
     _pine(empty("prop_pine_a"), 3, ("pine", "pine2"))
     _pine(empty("prop_pine_b"), 4, ("pine2", "pine"), height=0.92)
 
+    # Flower beds are placed by the dozen, so they stay cheap (about 250 triangles): low shrubs, block blooms.
     p = empty("prop_flower")
-    box((0.84, 0.84, 0.1), (0, 0, 0.05), stone("brick"), p, bevel=0.015)
+    box((0.84, 0.84, 0.1), (0, 0, 0.05), stone("brick"), p, bevel=0)
     box((0.74, 0.74, 0.02), (0, 0, 0.1), stone("soil"), p, bevel=0)
+    leaf = mat("leaf2", roughness=0.85)
     for i in range(9):
         x, y = ((i % 3) - 1) * 0.24, (i // 3 - 1) * 0.24
-        sphere(0.085, (x, y, 0.15), mat("leaf2", roughness=0.85), p, subdiv=1, scale=(1, 1, 0.7))
+        cone(0.1, 0.1, (x, y, 0.16), leaf, p, verts=6)
         c = mat(["red", "yellow", "pink", "purple"][i % 4], roughness=0.6)
-        for dx, dy in ((0.04, 0.02), (-0.03, 0.04), (0.0, -0.045)):
-            ball(0.03, (x + dx, y + dy, 0.2), c, p)
+        for dx, dy in ((0.035, 0.02), (-0.03, -0.03)):
+            box((0.045, 0.045, 0.03), (x + dx, y + dy, 0.2), c, p, bevel=0)
 
     p = empty("prop_fountain")
     cyl(0.44, 0.16, (0, 0, 0.08), stone(), p, verts=24)
@@ -417,26 +419,21 @@ def scenery():
     for i in range(8):
         box((0.04, 0.015, 0.27), (-0.39 + i * 0.111, -0.008, 0.155), white, p, bevel=0)
 
+    # The gate fits its own tile (±0.5): pillars, an arched sign and lamps; no booths spilling onto the
+    # neighbouring tiles, where stalls can be built.
     p = empty("prop_gate")
-    for x in (-0.78, 0.78):
-        box((0.26, 0.26, 1.26), (x, 0, 0.63), stone("brick"), p, bevel=0.02)
-        box((0.32, 0.32, 0.06), (x, 0, 1.29), stone(), p, bevel=0.015)
-        box((0.32, 0.32, 0.08), (x, 0, 0.04), stone(), p, bevel=0.015)
-        ball(0.07, (x, 0, 1.39), bulb("lamp", 2.5), p, seg=10, rings=6)
-        flag((x, 0, 1.46), "yellow", p, h=0.3)
-    box((1.4, 0.14, 0.3), (0, 0, 1.12), paint("red"), p, bevel=0.03)
-    box((1.44, 0.16, 0.04), (0, 0, 1.29), brass(), p, bevel=0.01)
-    box((1.44, 0.16, 0.04), (0, 0, 0.95), brass(), p, bevel=0.01)
-    text("PARKWRIGHT", (0, -0.075, 1.12), 0.15, paint("cream"), p)
-    for i in range(9):
-        ball(0.018, (-0.6 + i * 0.15, -0.08, 0.92), bulb(), p, seg=6, rings=3)
-    # Ticket booths either side.
-    for x in (-1.2, 1.2):
-        box((0.42, 0.4, 0.5), (x, 0, 0.29), paint("cream"), p, bevel=0.02)
-        box((0.44, 0.42, 0.08), (x, 0, 0.08), stone("brick"), p, bevel=0.012)
-        box((0.26, 0.03, 0.18), (x, -0.2, 0.4), glass(), p, bevel=0.005)
-        squash(cone(0.38, 0.22, (x, 0, 0.65), paint("red"), p, verts=4, rot=(0, 0, math.pi / 4)), sy=0.95)
-
+    for x in (-0.4, 0.4):
+        box((0.16, 0.16, 1.2), (x, 0, 0.6), stone("brick"), p, bevel=0.015)
+        box((0.2, 0.2, 0.05), (x, 0, 1.225), stone(), p, bevel=0.01)
+        box((0.2, 0.2, 0.07), (x, 0, 0.035), stone(), p, bevel=0.01)
+        ball(0.05, (x, 0, 1.3), bulb("lamp", 2.5), p, seg=10, rings=6)
+        flag((x, 0, 1.35), "yellow", p, h=0.24)
+    box((0.86, 0.12, 0.24), (0, 0, 1.06), paint("red"), p, bevel=0.025)
+    box((0.9, 0.14, 0.035), (0, 0, 1.2), brass(), p, bevel=0.008)
+    box((0.9, 0.14, 0.035), (0, 0, 0.93), brass(), p, bevel=0.008)
+    text("PARKWRIGHT", (0, -0.065, 1.06), 0.1, paint("cream"), p)
+    for i in range(6):
+        ball(0.016, (-0.3 + i * 0.12, -0.07, 0.9), bulb(), p, seg=6, rings=3)
 
 MODELS = {f.__name__: f for f in (carousel, teacups, wheel, swings, droptower, spookwalk, stall, restroom, scenery)}
 
