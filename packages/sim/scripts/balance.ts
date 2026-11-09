@@ -48,7 +48,7 @@ function run(name: ParkName) {
 
 function stressRun(sizes: number[]) {
   console.log(`\n== stress (big park, rules ${rules ?? 'default'}, seed ${seed})`);
-  console.log('   size  in park   ms/day');
+  console.log('   size  in park   ms/day  worst tick');
   for (const n of sizes) {
     const p = big({ rules, seed }).park;
     p.advanceTo(TICKS_PER_DAY);
@@ -62,15 +62,19 @@ function stressRun(sizes: number[]) {
     p.advanceTo(2 * TICKS_PER_DAY); // let them spread out over the paths
     fill();
     // Time one day, topping the crowd back up as people leave (the top-ups are part of the cost).
-    let ms = 0, sum = 0, samples = 0;
+    let ms = 0, sum = 0, samples = 0, worst = 0;
     while (p.s.tick < 3 * TICKS_PER_DAY) {
       fill();
-      const t0 = performance.now();
-      p.advanceTo(Math.min(3 * TICKS_PER_DAY, p.s.tick + 60));
-      ms += performance.now() - t0;
+      const end = Math.min(3 * TICKS_PER_DAY, p.s.tick + 60);
+      while (p.s.tick < end) {
+        const t0 = performance.now();
+        p.tick();
+        const dt = performance.now() - t0;
+        ms += dt; worst = Math.max(worst, dt);
+      }
       sum += here(p.s); samples++;
     }
-    console.log(`${String(n).padStart(7)} ${String(Math.round(sum / samples)).padStart(8)} ${ms.toFixed(0).padStart(8)}`);
+    console.log(`${String(n).padStart(7)} ${String(Math.round(sum / samples)).padStart(8)} ${ms.toFixed(0).padStart(8)} ${worst.toFixed(2).padStart(10)}`);
   }
 }
 
