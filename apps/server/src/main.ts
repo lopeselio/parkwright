@@ -4,6 +4,7 @@ import { Layered, MemoryCache, RedisCache, type Cache } from './cache.ts';
 import { CosmosStore, FileStore, type Store } from './store.ts';
 import { Settler, type ChainApi } from './settle.ts';
 import { Verifier } from './verify.ts';
+import type { ClaimChain } from './claim.ts';
 import { NearAiClient } from '@parkwright/ai';
 import { attachBridge } from './bridge.ts';
 import { attachClaudeTerminal } from './claude.ts';
@@ -31,7 +32,7 @@ const [store, cache] = await Promise.all([makeStore(), makeCache()]);
 const verifier = new Verifier(cache);
 
 /** NEAR settlement: on when the server has chain keys (hosted secrets), or SETTLE_LOCAL=1 (~/.near-credentials). */
-async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: string) => Promise<unknown> }> {
+async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: string) => Promise<unknown>; claim?: ClaimChain }> {
   const local = process.env.SETTLE_LOCAL === '1';
   if (!local && !(process.env.PARK_ADMIN_KEY && process.env.PATRON_KEYS)) return {};
   const chain = await import('@parkwright/chain');
@@ -49,9 +50,18 @@ async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: stri
     lines: (spend) => chain.settlementLines(spend),
     lowWater: BigInt(chain.LOW_WATER),
   };
-  return { settler: new Settler(api, store, cache, Date.now, verifier), chainPark: chain.getPark };
+  const claim: ClaimChain = {
+    admin: chain.ADMIN,
+    message: chain.claimMessage,
+    recipient: chain.CLAIM_RECIPIENT,
+    parkOwner: api.parkOwner,
+    registerPark: api.registerPark,
+    assignPark: (id, owner) => admin.assignPark(id, owner),
+    verifySignature: (signed, id, nonce) => chain.verifyClaimSignature(signed, id, nonce),
+  };
+  return { settler: new Settler(api, store, cache, Date.now, verifier), chainPark: chain.getPark, claim };
 }
-const { settler, chainPark } = await makeSettler();
+const { settler, chainPark, claim } = await makeSettler();
 if (settler) {
   const every = Number(process.env.SETTLE_MS ?? 20_000);
   setInterval(() => { settler.tick().catch((e) => console.error('[settle]', e)); }, every).unref();
@@ -64,7 +74,7 @@ const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_
 const relay: Relay = process.env.REDIS_URL ? await RedisRelay.connect(process.env.REDIS_URL).catch((e) => { console.error('[relay] falling back to local:', e.message); return new LocalRelay(); }) : new LocalRelay();
 // With settlement on, /api/health also lists signers low on NEAR for gas (read at most every 10 min).
 const gas = settler ? new GasWatch(async () => (await import('@parkwright/chain/gas')).gasReport()) : undefined;
-const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay, verifier, gas }, { webDist: WEB_DIST, version: VERSION });
+const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay, verifier, gas, claim }, { webDist: WEB_DIST, version: VERSION });
 attachBridge(server, relay, cache);
 // Local-only Claude terminal for modding (PW_CLAUDE_TERMINAL=1; never on the hosted image).
 attachClaudeTerminal(server, relay, PORT, resolve(new URL('../../..', import.meta.url).pathname));
