@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { nameRequest } from './route.ts';
 import { handleParks, type Deps } from './parks.ts';
 import { handleAi } from './ai.ts';
 import type { NearAiClient } from '@parkwright/ai';
@@ -14,6 +15,7 @@ export function createApp(deps: Deps & { ai?: NearAiClient; relay?: Relay; gas?:
   return createServer(async (req, res) => {
     try {
       const path = (req.url ?? '/').split('?')[0];
+      nameRequest(req.method, path);
       if (path === '/api/health') {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         res.end(JSON.stringify({ ok: true, version: opts.version, store: deps.store.kind, cache: deps.cache.kind, settlement: !!deps.settler, ai: deps.ai?.model ?? null, bridge: relay.kind, ...(deps.gas ? { gas: await deps.gas.status() } : {}) }));
