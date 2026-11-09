@@ -121,6 +121,19 @@ The base pack ships 6 flat rides (carousel, swing tower, drop tower, teacups, fe
   - monthly ride income ≥ X;
   - build K coasters with E ≥ 6.
 
+### 6.1 Rules versions
+
+Published parks are verified by replaying their action log, so a rule change must never change how an existing park plays out. `ParkState.rules` names the rules a park runs on. New parks start on the latest version; saves without the field are v1 and replay exactly as they always did. Every behavioural change is gated on the park's own version, the server replays each save on its own version, and frozen v1 action logs in `packages/sim/test/fixtures` must keep reproducing their recorded state hash.
+
+- **v1:** the original rules, tuned for about 100–400 visitors.
+- **v2 (balance pass for 500–1,500 visitors):**
+  - arrivals scale with the draw of the open rides (×(1 + draw/40)) and build up by word of mouth (from 1/6 of demand to full after 5,000 visitors); a park slows arrivals at 3.5× its draw and fills at 5×;
+  - flat rides cycle in 60% of the time and dispatch a partial load after 60 ticks instead of 120; 20 can wait at an entrance before queue tiles;
+  - visitors skip rides whose queue is full, weigh a queue by how full it is, and care half as much about intensity, so a crowd spreads over the rides; a path tile takes 12 before it feels crowded;
+  - litter goes in any bin within 2 tiles; handymen look up to 8 path tiles out for litter; the rating counts litter per path tile and forgives a few lost visitors per 50 in the park;
+  - wages ×4 and upkeep ×3, so running costs keep pace with a big park's takings.
+- `pnpm --filter @parkwright/sim balance` builds reference parks with `pw` commands and prints visitors, rating, cash, income, spend and ms per simulated day; `--stress 500,1000,1500` times a day at a fixed crowd size.
+
 ## 7. Actions (the moddable core)
 
 Every change to the game is an `Action`: `{ type, params, actor, tick }`, handled in two steps:

@@ -29,6 +29,7 @@ Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 2
 ## Tests
 
 - Do: `pnpm test`. See: the sim, server, chain and AI unit tests.
+- Do: `pnpm --filter @parkwright/sim balance --days 42 --every 7`. See: three reference parks (starter, mid, big) built with `pw` commands, with visitors, rating, cash, income, spend per day and ms per simulated day. A good mid-sized park reaches about 1,000–1,300 visitors in three weeks. Add `--stress 500,1000,1500` to time one day at each crowd size, or `--rules 1` for the original rules (see DESIGN §6.1).
 - Do: `pnpm e2e` (first time: `pnpm --filter @parkwright/e2e exec playwright install chromium`). See: it builds the web app, starts the real server on :8931 with file saves and no chain or AI keys, and headless Chromium checks the title screen and New park flow, building a path and a ride (ride count up, cash down by the cost), `?` and Esc for How to play, and Publish & share followed by `/api/parks/<id>/verify` reporting `verified: true`, with no console errors. CI runs the same in the `e2e` job and uploads the Playwright report when it fails.
 
 ## Host it
