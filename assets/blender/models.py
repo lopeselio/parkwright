@@ -357,7 +357,7 @@ def scenery():
     _pine(empty("prop_pine_a"), 3, ("pine", "pine2"))
     _pine(empty("prop_pine_b"), 4, ("pine2", "pine"), height=0.92)
 
-    # Flower beds are placed by the dozen, so they stay cheap (about 250 triangles): low shrubs, block blooms.
+    # Flower beds are placed by the dozen, so they stay cheap (about 330 triangles): low shrubs, block blooms.
     p = empty("prop_flower")
     box((0.84, 0.84, 0.1), (0, 0, 0.05), stone("brick"), p, bevel=0)
     box((0.74, 0.74, 0.02), (0, 0, 0.1), stone("soil"), p, bevel=0)
