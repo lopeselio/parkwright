@@ -131,7 +131,11 @@ Published parks are verified by replaying their action log, so a rule change mus
   - flat rides cycle in 60% of the time and dispatch a partial load after 60 ticks instead of 120; 20 can wait at an entrance before queue tiles;
   - visitors skip rides whose queue is full, weigh a queue by how full it is, and care half as much about intensity, so a crowd spreads over the rides; a path tile takes 12 before it feels crowded;
   - litter goes in any bin within 2 tiles; handymen look up to 8 path tiles out for litter; the rating counts litter per path tile and forgives a few lost visitors per 50 in the park;
-  - wages ×4 and upkeep ×3, so running costs keep pace with a big park's takings.
+  - wages ×4 and upkeep ×3, so running costs keep pace with a big park's takings;
+  - demand stops growing past a ride draw of 360, and the gate turns visitors away while 2,000 are inside;
+  - each day's settlement record (`DayStats.spend`) is scaled to at most 4,800 CR a park and 950 CR a patron group, under the contract's 5,000 / 1,000 caps. The park keeps all its takings; only what's settled on NEAR is capped. Even 96 venues at triple prices settle 4,799 CR on their best day;
+  - goals per rules version: the v2 meadow goal is 1,000 visitors at rating 650 by day 56 (v1 keeps 120 at 600);
+  - a save naming an unknown rules version is refused on load.
 - `pnpm --filter @parkwright/sim balance` builds reference parks with `pw` commands and prints visitors, rating, cash, income, spend and ms per simulated day; `--stress 500,1000,1500` times a day at a fixed crowd size.
 
 ## 7. Actions (the moddable core)
