@@ -25,13 +25,17 @@ describe('verify by replay', () => {
     expect(r).toMatchObject({ ok: true });
   });
 
-  it('a park on the old (v1) rules still verifies; an unknown rules version does not', () => {
+  it('a park on the old (v1) rules still verifies; a swapped or unknown rules version does not', () => {
     const { save } = played(3, 5, 1);
     expect(save.snapshot.rules).toBeUndefined();
     expect(verifySave(save)).toMatchObject({ ok: true });
     const current = played(3, 5).save;
     expect(verifySave(current)).toMatchObject({ ok: true });
     expect(verifySave({ ...current, snapshot: { ...current.snapshot, rules: 99 } }).ok).toBe(false);
+    // The rules version is part of what's verified: relabelling a park either way doesn't reproduce it.
+    expect(verifySave({ ...save, snapshot: { ...save.snapshot, rules: 2 } }).ok).toBe(false);
+    const { rules: _drop, ...unversioned } = current.snapshot;
+    expect(verifySave({ ...current, snapshot: unversioned }).ok).toBe(false);
   });
 
   it('inflated spend, a dropped action, or a partial log do not verify', () => {
