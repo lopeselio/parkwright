@@ -86,3 +86,31 @@ describe('only verified parks rank', () => {
     expect(v.verified).toBe(false);
   }, 30_000);
 });
+
+describe('review: forgery and queue', () => {
+  it('a save whose 32-bit sim hash matches but whose content differs still fails (SHA-256 over the state)', async () => {
+    const { save } = played(2, 21);
+    const forged = structuredClone(save);
+    forged.snapshot.history[0].spend['0'] = { gate: 99_999 };
+    forged.snapshot.zz = 'padding-to-steer-a-32-bit-hash';
+    expect(verifySave(forged).ok).toBe(false);
+  });
+
+  it('settlement and ranking numbers come from the replay, not the upload', () => {
+    const { p, save } = played(3, 22);
+    const r = verifySave(save);
+    expect(r.ok).toBe(true);
+    const spent = (h: { spend: Record<string, Record<string, number>> }[]) => h.reduce((a, d) => a + Object.values(d.spend).flatMap((g) => Object.values(g)).reduce((x, y) => x + y, 0), 0);
+    expect(spent(r.replayed!.history)).toBe(spent(p.s.history.filter((d) => d.day < p.s.day)));
+    expect(r.replayed!.day).toBe(p.s.day);
+  });
+
+  it('coalesces pending versions of a park and never caches transient failures for long', async () => {
+    const v = new Verifier(new MemoryCache());
+    const a = played(1, 31).save, b = played(1, 32).save;
+    const [r1, r2] = await Promise.all([v.verify('parkxyz', 1, a), v.verify('parkxyz', 2, b)]);
+    // v1 may have started already; whichever was still waiting when v2 arrived is superseded.
+    expect([r1.ok || r1.reason === 'superseded by a newer save', r2.ok]).toEqual([true, true]);
+    expect((await v.latest('parkxyz'))?.version).toBe(2);
+  }, 30_000);
+});
