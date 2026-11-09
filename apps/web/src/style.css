@@ -174,3 +174,4 @@ button.link { border: none; background: none; color: var(--muted); text-decorati
 .next-piece { min-height: 2.6em; margin: 6px 0; font-size: 13px; line-height: 1.35; }
 .next-piece.ok { color: var(--good); }
 .next-piece.bad { color: #b8423a; }
+.next-piece.broke { color: #a8701a; }
