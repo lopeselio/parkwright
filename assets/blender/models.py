@@ -4,6 +4,7 @@
 
 Footprints match the content pack (tiles): carousel 3x3, teacups 3x3, wheel 3x2, swings 3x3, droptower 2x2,
 spookwalk 3x2, stall 1x1, restroom 1x1. Fronts face -Y in Blender (+Z in the game), where entrances are.
+"scenery" is one file of props (trees, benches, lamps, bins, fences, the park gate), each under a "prop_<name>" empty.
 """
 import math
 import os
@@ -332,7 +333,111 @@ def restroom():
         ball(0.025, (x, -0.35, 0.58), bulb(), seg=8, rings=5)
 
 
-MODELS = {f.__name__: f for f in (carousel, teacups, wheel, swings, droptower, spookwalk, stall, restroom)}
+# ---- Scenery props ------------------------------------------------------------------------------------------
+
+def _oak(p, leaves, tall=1.0):
+    cyl(0.055, 0.42 * tall, (0, 0, 0.21 * tall), wood(dark=True), p, verts=8, r2=0.035)
+    rod((0, 0, 0.3 * tall), (0.1, 0.04, 0.45 * tall), 0.02, wood(dark=True), p, verts=5)
+    rod((0, 0, 0.32 * tall), (-0.09, -0.05, 0.47 * tall), 0.02, wood(dark=True), p, verts=5)
+    for (x, y, z, r), c in zip(((0, 0, 0.64, 0.28), (0.14, 0.06, 0.52, 0.19), (-0.12, -0.08, 0.55, 0.2), (0.02, -0.13, 0.72, 0.16)), leaves):
+        sphere(r, (x, y, z * tall), mat(c, roughness=0.85), p)
+
+
+def _pine(p, tiers, colours, height=1.0):
+    cyl(0.04, 0.22, (0, 0, 0.11), wood(dark=True), p, verts=6)
+    for i in range(tiers):
+        t = i / tiers
+        r = 0.32 * (1 - t * 0.6)
+        cone(r, 0.42 * height, (0, 0, 0.36 * height + i * 0.2 * height), mat(colours[i % 2], roughness=0.85), p, verts=8)
+
+
+def scenery():
+    _oak(empty("prop_oak_a"), ("leaf", "leaf2", "leaf", "leaf2"))
+    _oak(empty("prop_oak_b"), ("leaf3", "leaf", "leaf3", "leaf"), tall=1.15)
+    _pine(empty("prop_pine_a"), 3, ("pine", "pine2"))
+    _pine(empty("prop_pine_b"), 4, ("pine2", "pine"), height=0.92)
+
+    p = empty("prop_flower")
+    box((0.84, 0.84, 0.1), (0, 0, 0.05), stone("brick"), p, bevel=0.015)
+    box((0.74, 0.74, 0.02), (0, 0, 0.1), stone("soil"), p, bevel=0)
+    for i in range(9):
+        x, y = ((i % 3) - 1) * 0.24, (i // 3 - 1) * 0.24
+        sphere(0.085, (x, y, 0.15), mat("leaf2", roughness=0.85), p, subdiv=1, scale=(1, 1, 0.7))
+        c = mat(["red", "yellow", "pink", "purple"][i % 4], roughness=0.6)
+        for dx, dy in ((0.04, 0.02), (-0.03, 0.04), (0.0, -0.045)):
+            ball(0.03, (x + dx, y + dy, 0.2), c, p)
+
+    p = empty("prop_fountain")
+    cyl(0.44, 0.16, (0, 0, 0.08), stone(), p, verts=24)
+    torus(0.42, 0.03, (0, 0, 0.16), stone(), p, seg=24, minor_seg=4)
+    cyl(0.39, 0.02, (0, 0, 0.14), mat("water", roughness=0.08, metallic=0.1), p, verts=24, bevel=0)
+    cyl(0.06, 0.34, (0, 0, 0.3), stone(), p, verts=10)
+    cyl(0.12, 0.05, (0, 0, 0.47), stone(), p, verts=14, r2=0.19)
+    cyl(0.16, 0.012, (0, 0, 0.495), mat("water", roughness=0.08, metallic=0.1), p, verts=14, bevel=0)
+    ball(0.05, (0, 0, 0.56), stone(), p, seg=8, rings=5)
+    sphere(0.09, (0, 0, 0.66), mat("water", roughness=0.05, alpha=0.6), p, subdiv=1, scale=(1, 1, 1.4))
+
+    p = empty("prop_hedge")
+    box((0.92, 0.38, 0.06), (0, 0, 0.03), wood(dark=True), p, bevel=0.01)
+    box((0.88, 0.34, 0.32), (0, 0, 0.21), mat("leaf3", roughness=0.9), p, bevel=0.08, segments=2)
+
+    p = empty("prop_bench")
+    for i, y in enumerate((-0.04, 0.0, 0.04)):
+        box((0.5, 0.035, 0.014), (0, y, 0.11), wood(), p, bevel=0.005)
+    for z in (0.17, 0.21):
+        box((0.5, 0.012, 0.03), (0, 0.07, z), wood(), p, rot=(0.2, 0, 0), bevel=0.005)
+    for x in (-0.21, 0.21):
+        box((0.025, 0.13, 0.02), (x, 0, 0.1), iron(), p, bevel=0.005)
+        rod((x, -0.05, 0), (x, -0.05, 0.1), 0.01, iron(), p, verts=5)
+        rod((x, 0.05, 0), (x, 0.07, 0.23), 0.01, iron(), p, verts=5)
+        rod((x, -0.06, 0.15), (x, 0.06, 0.15), 0.008, iron(), p, verts=5)
+
+    p = empty("prop_lamp")
+    cyl(0.05, 0.06, (0, 0, 0.03), iron(), p, verts=8)
+    cyl(0.018, 0.84, (0, 0, 0.48), iron(), p, verts=8, r2=0.013)
+    torus(0.03, 0.008, (0, 0, 0.86), iron(), p, seg=8, minor_seg=4)
+    ball(0.055, (0, 0, 0.93), bulb("lamp", 2.5), p, seg=10, rings=6)
+    cone(0.07, 0.06, (0, 0, 1.0), iron(), p, verts=8)
+    ball(0.012, (0, 0, 1.04), iron(), p)
+
+    p = empty("prop_bin")
+    cyl(0.075, 0.2, (0, 0, 0.1), paint("green"), p, verts=12, r2=0.068)
+    torus(0.072, 0.012, (0, 0, 0.2), iron(), p, seg=12, minor_seg=4)
+    torus(0.074, 0.008, (0, 0, 0.04), iron(), p, seg=12, minor_seg=4)
+    sphere(0.072, (0, 0, 0.205), paint("green"), p, subdiv=1, scale=(1, 1, 0.4))
+
+    p = empty("prop_fence")
+    white = paint("white")
+    for x in (-0.5, 0.5):
+        box((0.05, 0.05, 0.34), (x, 0, 0.17), white, p, bevel=0.01)
+        ball(0.03, (x, 0, 0.36), white, p)
+    for z in (0.1, 0.24):
+        box((1.0, 0.02, 0.035), (0, 0.015, z), white, p, bevel=0.006)
+    for i in range(8):
+        box((0.04, 0.015, 0.27), (-0.39 + i * 0.111, -0.008, 0.155), white, p, bevel=0.008)
+
+    p = empty("prop_gate")
+    for x in (-0.78, 0.78):
+        box((0.26, 0.26, 1.26), (x, 0, 0.63), stone("brick"), p, bevel=0.02)
+        box((0.32, 0.32, 0.06), (x, 0, 1.29), stone(), p, bevel=0.015)
+        box((0.32, 0.32, 0.08), (x, 0, 0.04), stone(), p, bevel=0.015)
+        ball(0.07, (x, 0, 1.39), bulb("lamp", 2.5), p, seg=10, rings=6)
+        flag((x, 0, 1.46), "yellow", p, h=0.3)
+    box((1.4, 0.14, 0.3), (0, 0, 1.12), paint("red"), p, bevel=0.03)
+    box((1.44, 0.16, 0.04), (0, 0, 1.29), brass(), p, bevel=0.01)
+    box((1.44, 0.16, 0.04), (0, 0, 0.95), brass(), p, bevel=0.01)
+    text("PARKWRIGHT", (0, -0.075, 1.12), 0.15, paint("cream"), p)
+    for i in range(9):
+        ball(0.018, (-0.6 + i * 0.15, -0.08, 0.92), bulb(), p, seg=6, rings=3)
+    # Ticket booths either side.
+    for x in (-1.2, 1.2):
+        box((0.42, 0.4, 0.5), (x, 0, 0.29), paint("cream"), p, bevel=0.02)
+        box((0.44, 0.42, 0.08), (x, 0, 0.08), stone("brick"), p, bevel=0.012)
+        box((0.26, 0.03, 0.18), (x, -0.2, 0.4), glass(), p, bevel=0.005)
+        squash(cone(0.38, 0.22, (x, 0, 0.65), paint("red"), p, verts=4, rot=(0, 0, math.pi / 4)), sy=0.95)
+
+
+MODELS = {f.__name__: f for f in (carousel, teacups, wheel, swings, droptower, spookwalk, stall, restroom, scenery)}
 
 if __name__ == "__main__":
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
