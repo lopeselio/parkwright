@@ -406,15 +406,16 @@ def scenery():
     torus(0.074, 0.008, (0, 0, 0.04), iron(), p, seg=12, minor_seg=4)
     sphere(0.072, (0, 0, 0.205), paint("green"), p, subdiv=1, scale=(1, 1, 0.4))
 
+    # The fence rings the whole park (hundreds of segments), so it stays plain boxes: about 170 triangles.
     p = empty("prop_fence")
     white = paint("white")
     for x in (-0.5, 0.5):
-        box((0.05, 0.05, 0.34), (x, 0, 0.17), white, p, bevel=0.01)
-        ball(0.03, (x, 0, 0.36), white, p)
+        box((0.05, 0.05, 0.34), (x, 0, 0.17), white, p, bevel=0)
+        box((0.07, 0.07, 0.025), (x, 0, 0.35), white, p, bevel=0)
     for z in (0.1, 0.24):
-        box((1.0, 0.02, 0.035), (0, 0.015, z), white, p, bevel=0.006)
+        box((1.0, 0.02, 0.035), (0, 0.015, z), white, p, bevel=0)
     for i in range(8):
-        box((0.04, 0.015, 0.27), (-0.39 + i * 0.111, -0.008, 0.155), white, p, bevel=0.008)
+        box((0.04, 0.015, 0.27), (-0.39 + i * 0.111, -0.008, 0.155), white, p, bevel=0)
 
     p = empty("prop_gate")
     for x in (-0.78, 0.78):
