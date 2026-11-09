@@ -4,3 +4,5 @@ packages:
 # Vite 8 bundles with Rolldown; esbuild's install script is not needed.
 allowBuilds:
   esbuild: false
+  # protobufjs (via OpenTelemetry) only prints a version notice from its install script.
+  protobufjs: false
