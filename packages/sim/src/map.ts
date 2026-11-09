@@ -62,7 +62,20 @@ export function queueChain(s: ParkState, r: Ride): [number, number][] {
 
 /** How many can wait for a ride: a few at the entrance (about a full load in rules v2) plus 8 per queue tile. */
 export function queueCapacity(s: ParkState, r: Ride): number {
-  return (rulesOf(s) >= 2 ? 20 : 6) + 8 * queueChain(s, r).length;
+  return (rulesOf(s) >= 2 ? 20 : 6) + 8 * queueTiles(s, r);
+}
+
+// Queue lengths only change with the map (paths and rides bump mapVersion), so cache them per state and version.
+const queueCache = new WeakMap<ParkState, { version: number; tiles: Map<number, number> }>();
+
+function queueTiles(s: ParkState, r: Ride): number {
+  let e = queueCache.get(s);
+  if (!e || e.version !== s.mapVersion) { e = { version: s.mapVersion, tiles: new Map() }; queueCache.set(s, e); }
+  // Key on the entrance too: it's what the chain grows from.
+  const key = r.id * 65536 + r.ey * 256 + r.ex;
+  let n = e.tiles.get(key);
+  if (n === undefined) { n = queueChain(s, r).length; e.tiles.set(key, n); }
+  return n;
 }
 
 /** Path tiles from which a visitor can step into the ride (directly or via its queue). */

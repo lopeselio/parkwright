@@ -103,6 +103,7 @@ export function refusal(s: ParkState, c: Content, v: Visitor, r: Ride): string |
 }
 
 function chooseRide(s: ParkState, c: Content, routes: Routes, v: Visitor): Ride | null {
+  const v2 = rulesOf(s) >= 2;
   let best: Ride | null = null, bestScore = -Infinity;
   for (const r of s.rides) {
     if (!attraction(c, r) || r.status !== 'open' || !r.ratings) continue;
@@ -114,7 +115,14 @@ function chooseRide(s: ParkState, c: Content, routes: Routes, v: Visitor): Ride 
     const slack = v.happy >> 2;
     if (r.ratings.i < v.thrill[0] - slack || r.ratings.i > v.thrill[1] + slack) continue;
     const mid = (v.thrill[0] + v.thrill[1]) / 2;
-    const score = r.ratings.e - Math.abs(r.ratings.i - mid) - r.queue.length * 8 - d * 2 + (v.ridden.includes(r.id) ? 0 : 120) + randInt(s.rng, 80);
+    let score: number;
+    if (v2) {
+      // v2: a full queue isn't worth the walk, a long one counts against the ride by how full it is,
+      // and intensity matters half as much, so a crowd spreads over every ride it would enjoy.
+      const cap = queueCapacity(s, r);
+      if (r.queue.length >= cap) continue;
+      score = r.ratings.e - (Math.abs(r.ratings.i - mid) >> 1) - Math.floor((r.queue.length * 200) / cap) - d * 2 + (v.ridden.includes(r.id) ? 0 : 120) + randInt(s.rng, 80);
+    } else score = r.ratings.e - Math.abs(r.ratings.i - mid) - r.queue.length * 8 - d * 2 + (v.ridden.includes(r.id) ? 0 : 120) + randInt(s.rng, 80);
     if (score > bestScore) { bestScore = score; best = r; }
   }
   return best;
@@ -196,6 +204,8 @@ function dropLitter(s: ParkState, v: Visitor) {
   s.litter[k] = Math.min(9, s.litter[k] + 1);
 }
 
+const CROWDED_V2 = 12;
+
 function surroundings(s: ParkState, v: Visitor, counts: Crowd) {
   let crowd = 0, litter = 0, beauty = 0;
   // v1 scans every visitor (O(n) per check, O(n²) a day); v2 reads the per-tick tile counts.
@@ -207,7 +217,8 @@ function surroundings(s: ParkState, v: Visitor, counts: Crowd) {
     litter += s.litter[k];
     beauty += SCENERY[s.scenery[k]]?.beauty ?? 0;
   }
-  if (crowd >= 8) { v.happy = clamp(v.happy - 6); think(s, v, 'too crowded'); }
+  // v2 paths take a bigger crowd before it feels packed.
+  if (crowd >= (counts ? CROWDED_V2 : 8)) { v.happy = clamp(v.happy - 6); think(s, v, 'too crowded'); }
   if (litter >= 6) { v.happy = clamp(v.happy - 8); think(s, v, 'this path is filthy'); }
   if (beauty >= 12) { v.happy = clamp(v.happy + 6); if (beauty >= 24) think(s, v, 'lovely gardens'); }
   for (const st of s.staff) if (st.role === 'entertainer' && Math.abs(st.tx - v.tx) + Math.abs(st.ty - v.ty) <= 3) v.happy = clamp(v.happy + 3);
