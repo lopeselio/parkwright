@@ -3,6 +3,7 @@ import { createApp } from './app.ts';
 import { Layered, MemoryCache, RedisCache, type Cache } from './cache.ts';
 import { CosmosStore, FileStore, type Store } from './store.ts';
 import { Settler, type ChainApi } from './settle.ts';
+import { Verifier } from './verify.ts';
 import { NearAiClient } from '@parkwright/ai';
 import { attachBridge } from './bridge.ts';
 import { attachClaudeTerminal } from './claude.ts';
@@ -26,6 +27,7 @@ async function makeCache(): Promise<Cache> {
 }
 
 const [store, cache] = await Promise.all([makeStore(), makeCache()]);
+const verifier = new Verifier(cache);
 
 /** NEAR settlement: on when the server has chain keys (hosted secrets), or SETTLE_LOCAL=1 (~/.near-credentials). */
 async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: string) => Promise<unknown> }> {
@@ -46,7 +48,7 @@ async function makeSettler(): Promise<{ settler?: Settler; chainPark?: (id: stri
     lines: (spend) => chain.settlementLines(spend),
     lowWater: BigInt(chain.LOW_WATER),
   };
-  return { settler: new Settler(api, store, cache), chainPark: chain.getPark };
+  return { settler: new Settler(api, store, cache, Date.now, verifier), chainPark: chain.getPark };
 }
 const { settler, chainPark } = await makeSettler();
 if (settler) {
@@ -59,7 +61,7 @@ if (settler) {
 const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_KEY, process.env.NEARAI_MODEL ?? 'Qwen/Qwen3.6-35B-A3B-FP8') : undefined;
 // Bridge relay: Redis pub/sub across replicas when hosted, in-process locally.
 const relay: Relay = process.env.REDIS_URL ? await RedisRelay.connect(process.env.REDIS_URL).catch((e) => { console.error('[relay] falling back to local:', e.message); return new LocalRelay(); }) : new LocalRelay();
-const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay }, { webDist: WEB_DIST, version: VERSION });
+const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay, verifier }, { webDist: WEB_DIST, version: VERSION });
 attachBridge(server, relay, cache);
 // Local-only Claude terminal for modding (PW_CLAUDE_TERMINAL=1; never on the hosted image).
 attachClaudeTerminal(server, relay, PORT, resolve(new URL('../../..', import.meta.url).pathname));
