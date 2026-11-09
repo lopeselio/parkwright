@@ -4,6 +4,9 @@ import { accessTiles, idx, isPath, queueCapacity, Routes, SCENERY } from './map.
 import { chance, randInt, randRange } from './rng.ts';
 import { DX, DY, SUB, type Dir, type ParkState, type Ride, type Visitor } from './types.ts';
 
+/** Walking visitors per tile, counted once at the start of a tick (rules v2+), or null to count on demand (v1). */
+export type Crowd = Uint16Array | null;
+
 const FIRST = ['Ada', 'Bram', 'Cleo', 'Dev', 'Esme', 'Femi', 'Gus', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mina', 'Nico', 'Oona', 'Pip', 'Quin', 'Rosa', 'Sami', 'Tova', 'Uri', 'Vale', 'Wren', 'Xan', 'Yara', 'Zeb'];
 const LAST = ['Ash', 'Birch', 'Cole', 'Dunn', 'Ever', 'Frost', 'Gale', 'Hart', 'Isle', 'Jett', 'Knox', 'Lark', 'Moss', 'Nash', 'Oak', 'Pike', 'Reed', 'Stone', 'Thorn', 'Vance', 'West', 'Yew'];
 
@@ -184,9 +187,11 @@ function dropLitter(s: ParkState, v: Visitor) {
   s.litter[k] = Math.min(9, s.litter[k] + 1);
 }
 
-function surroundings(s: ParkState, v: Visitor) {
+function surroundings(s: ParkState, v: Visitor, counts: Crowd) {
   let crowd = 0, litter = 0, beauty = 0;
-  for (const o of s.visitors) if (o.mode === 'walking' && o.tx === v.tx && o.ty === v.ty) crowd++;
+  // v1 scans every visitor (O(n) per check, O(n²) a day); v2 reads the per-tick tile counts.
+  if (counts) crowd = counts[idx(s, v.tx, v.ty)];
+  else for (const o of s.visitors) if (o.mode === 'walking' && o.tx === v.tx && o.ty === v.ty) crowd++;
   for (let y = v.ty - 2; y <= v.ty + 2; y++) for (let x = v.tx - 2; x <= v.tx + 2; x++) {
     if (x < 0 || y < 0 || x >= s.w || y >= s.h) continue;
     const k = idx(s, x, y);
@@ -328,11 +333,11 @@ export function leaveRide(s: ParkState, r: Ride, v: Visitor) {
   v.goal = null;
 }
 
-export function updateVisitor(s: ParkState, c: Content, routes: Routes, v: Visitor) {
+export function updateVisitor(s: ParkState, c: Content, routes: Routes, v: Visitor, crowd: Crowd = null) {
   if (v.mode === 'gone') return;
   if (((s.tick + v.id) & 31) === 0) {
     stepNeeds(s, v);
-    if ((((s.tick + v.id) >> 5) & 7) === 0) surroundings(s, v);
+    if ((((s.tick + v.id) >> 5) & 7) === 0) surroundings(s, v, crowd);
     if (v.mode === 'walking' && v.queasy > 230 && chance(s.rng, 1, 4)) {
       s.litter[idx(s, v.tx, v.ty)] = Math.min(9, s.litter[idx(s, v.tx, v.ty)] + 2);
       v.queasy = 80;
