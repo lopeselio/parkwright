@@ -74,3 +74,46 @@ describe('goals follow the rules version', () => {
     expect(runCommand(v2, 'park').text).toMatch(/Goal: 1,000 visitors/);
   });
 });
+
+describe('v2 settlement record fits the contract caps', () => {
+  it('capSpend scales a day to ≤ 4,800 CR and every group to ≤ 950 CR, deterministically', async () => {
+    const { capSpend, SETTLE_DAY_CAP, SETTLE_GROUP_CAP } = await import('../src/index.ts');
+    const day: Record<string, Record<string, number>> = {};
+    for (let g = 0; g < 8; g++) day[String(g)] = { gate: 90_000 + g * 7, '3': 61_234, '7': 10_001 };
+    const copy = structuredClone(day);
+    capSpend(day);
+    capSpend(copy);
+    expect(day).toEqual(copy);
+    const groups = Object.values(day).map((g) => Object.values(g).reduce((a, b) => a + b, 0));
+    expect(groups.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(SETTLE_DAY_CAP);
+    for (const t of groups) expect(t).toBeLessThanOrEqual(SETTLE_GROUP_CAP);
+    const small = { '0': { gate: 1200 } };
+    capSpend(small);
+    expect(small).toEqual({ '0': { gate: 1200 } });
+  });
+
+  it('a mid park at top prices never records more than the caps on any day', async () => {
+    const { mid } = await import('../scripts/parks.ts');
+    const { runCommand, SETTLE_DAY_CAP, SETTLE_GROUP_CAP } = await import('../src/index.ts');
+    const ref = mid({ seed: 4 });
+    const p = ref.park;
+    for (const r of p.s.rides) runCommand(p, `ride price ${r.id} 50`);
+    runCommand(p, 'park fee 40');
+    for (let d = 1; d <= 21; d++) {
+      p.advanceTo(d * TICKS_PER_DAY);
+      ref.manage();
+    }
+    for (const h of p.s.history) {
+      const groups = Object.values(h.spend).map((g) => Object.values(g).reduce((a, b) => a + b, 0));
+      expect(groups.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(SETTLE_DAY_CAP);
+      for (const t of groups) expect(t).toBeLessThanOrEqual(SETTLE_GROUP_CAP);
+    }
+  }, 120_000);
+
+  it('a save claiming an unknown rules version is refused on load', async () => {
+    const { Park } = await import('../src/index.ts');
+    const s = Park.create(c, 'meadow', 2).snapshot();
+    for (const bad of [3, 0, '2', 1.5, null]) expect(() => new Park({ ...structuredClone(s), rules: bad as never }, c)).toThrow(/rules/);
+    expect(() => new Park(structuredClone(s), c)).not.toThrow();
+  });
+});
