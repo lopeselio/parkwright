@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time (owner): give the hosted server its NEAR keys, from ~/.near-credentials, as Container App secrets.
 #   - park-admin-key: the function-call key on parkwright.testnet limited to register_park/set_patron/fund_patrons
-#   - patron-keys:    JSON map of p0…p7.parkwright.testnet → their settle_day-only keys
+#   - patron-keys:    JSON map of g0…g7.parkwright.testnet → their settle_day-only keys (PATRON_PREFIX=g)
 # Neither key can move NEAR or call anything else. Run after `pnpm --filter @parkwright/chain setup:patrons`.
 set -euo pipefail
 RG=${RG:-parkwright}
@@ -13,7 +13,8 @@ ADMIN_KEY=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['priv
 PATRON_KEYS=$(python3 -c "
 import json,sys
 d,admin=sys.argv[1],sys.argv[2]
-print(json.dumps({f'p{i}.{admin}': json.load(open(f'{d}/p{i}.{admin}.json'))['private_key'] for i in range(8)}))" "$CREDS" "$ADMIN")
+pre=sys.argv[3]
+print(json.dumps({f'{pre}{i}.{admin}': json.load(open(f'{d}/{pre}{i}.{admin}.json'))['private_key'] for i in range(8)}))" "$CREDS" "$ADMIN" "${PATRON_PREFIX:-g}")
 
 az containerapp secret set -g "$RG" -n "$APP" --secrets "park-admin-key=$ADMIN_KEY" "patron-keys=$PATRON_KEYS" -o none
 az containerapp update -g "$RG" -n "$APP" -o none --set-env-vars \

@@ -10,14 +10,16 @@
  * 2. Registers each patron (daily cap) and funds its credit budget.
  * 3. Adds a function-call key to the admin account for the game server, limited to
  *    register_park / set_patron / fund_patrons on the park contract.
+ * 4. Deactivates the retired first-generation patrons (p0…p7), whose keys had a lifetime gas allowance.
  * New private keys go to ~/.near-credentials/testnet (never the repo). Idempotent.
+ * `--rotate-server-key` replaces the server's admin key (e.g. one created with an allowance).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Near, generateKey } from 'near-kit';
 import { FileKeyStore } from 'near-kit/keys/file';
-import { ADMIN, CONTRACT, DAY_CAP, NETWORK, PATRONS, RPC, TOP_UP, getPatron } from './index.ts';
+import { ADMIN, CONTRACT, DAY_CAP, NETWORK, PATRONS, RETIRED_PATRONS, RPC, TOP_UP, getPatron } from './index.ts';
 
 const near = new Near({ network: NETWORK, rpcUrl: RPC, keyStore: new FileKeyStore('~/.near-credentials', NETWORK), defaultSignerId: ADMIN });
 const credDir = join(homedir(), '.near-credentials', NETWORK);
@@ -67,16 +69,25 @@ if (unfunded.length) {
   console.log(`funded ${unfunded.length} patrons with ${TOP_UP / 100} CR each`);
 }
 
-// The server's admin key: only the three admin methods on the park contract.
+// The server's admin key: only the three admin methods on the park contract, no lifetime allowance.
 const serverKeyFile = join(credDir, `${ADMIN}.server-key.json`);
-if (!existsSync(serverKeyFile)) {
+const rotate = process.argv.includes('--rotate-server-key');
+if (!existsSync(serverKeyFile) || rotate) {
+  const old = existsSync(serverKeyFile) ? JSON.parse(readFileSync(serverKeyFile, 'utf8')).public_key as string : null;
   const key = generateKey();
-  await near
-    .transaction(ADMIN)
-    .addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons'] })
-    .send({ waitUntil: 'FINAL' });
-  saveKey(ADMIN, key.publicKey.toString(), key.secretKey, `${ADMIN}.server-key.json`);
-  console.log(`added the server's admin function-call key → ${serverKeyFile}`);
+  let tx = near.transaction(ADMIN).addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons'] });
+  if (old) tx = tx.deleteKey(ADMIN, old);
+  await tx.send({ waitUntil: 'FINAL' });
+  writeFileSync(serverKeyFile, JSON.stringify({ account_id: ADMIN, public_key: key.publicKey.toString(), private_key: key.secretKey }), { mode: 0o600 });
+  console.log(`${old ? 'rotated' : 'added'} the server's admin function-call key → ${serverKeyFile}${old ? ' (old key deleted on chain)' : ''}`);
+}
+
+for (const old of RETIRED_PATRONS) {
+  const p = await getPatron(old).catch(() => null);
+  if (p?.active) {
+    await near.transaction(ADMIN).functionCall(CONTRACT, 'set_patron', { patron: old, day_cap: p.day_cap, active: false }, { gas: '30 Tgas' }).send({ waitUntil: 'FINAL' });
+    console.log(`retired ${old}`);
+  }
 }
 
 const missing = PATRONS.filter((a) => !existsSync(join(credDir, `${a}.json`)));

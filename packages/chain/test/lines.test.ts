@@ -21,6 +21,7 @@ describe('settlement lines', () => {
 
   it('names one patron per visitor group', () => {
     expect(PATRONS).toHaveLength(8);
-    expect(patronAccount(3)).toBe('p3.parkwright.testnet');
+    expect(patronAccount(3)).toBe('g3.parkwright.testnet');
+    expect(patronAccount(3, 'p')).toBe('p3.parkwright.testnet');
   });
 });
