@@ -86,7 +86,8 @@ export class Verifier {
   private waiting = new Map<string, { version: number; save: unknown; resolve: (r: VerifyResult) => void }[]>();
   private order: string[] = [];
   private busy = false;
-  constructor(private cache: Cache, private timeoutMs = 30_000) {}
+  // A 400-day park of ~1,800 visitors replays in ~20–25 s on rules v2; leave room for a busy machine.
+  constructor(private cache: Cache, private timeoutMs = 60_000) {}
 
   private spawn() {
     // The worker is TypeScript too: make sure it can load .ts files whatever started this process.
