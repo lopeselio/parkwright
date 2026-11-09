@@ -69,22 +69,43 @@ export function buildCoaster(ride: Ride): CoasterView {
   ties.castShadow = true;
   g.add(ties);
 
-  // Timber supports down to the ground every few samples.
-  const postGeo = new THREE.BoxGeometry(0.05, 1, 0.05);
-  const posts: THREE.Matrix4[] = [];
+  // Timber bents down to the ground every few samples: two posts, a cap beam under the ties, a diagonal
+  // brace on the taller ones, and a concrete footing under each post. All instances of one unit box.
+  const unit = new THREE.BoxGeometry(1, 1, 1);
+  const timber: THREE.Matrix4[] = [], footings: THREE.Matrix4[] = [];
+  const up = new THREE.Vector3(0, 1, 0), qq = new THREE.Quaternion(), half = GAUGE * 1.4;
   for (let i = 0; i < pts.length; i += 4) {
     const v = vecs[i];
     if (v.y < 0.2) continue;
+    const r = right[i];
+    const yaw = Math.atan2(-r.z, r.x);
+    qq.setFromAxisAngle(up, yaw);
+    const top = v.y - 0.04;
     for (const side of [-1, 1]) {
-      const base = v.clone().addScaledVector(right[i], side * GAUGE * 1.4);
-      posts.push(new THREE.Matrix4().compose(new THREE.Vector3(base.x, (v.y - 0.04) / 2, base.z), new THREE.Quaternion(), new THREE.Vector3(1, v.y - 0.04, 1)));
+      const base = v.clone().addScaledVector(r, side * half);
+      timber.push(new THREE.Matrix4().compose(new THREE.Vector3(base.x, top / 2, base.z), qq, new THREE.Vector3(0.05, top, 0.05)));
+      footings.push(new THREE.Matrix4().compose(new THREE.Vector3(base.x, 0.02, base.z), qq, new THREE.Vector3(0.1, 0.04, 0.1)));
+    }
+    timber.push(new THREE.Matrix4().compose(new THREE.Vector3(v.x, top - 0.02, v.z), qq, new THREE.Vector3(half * 2 + 0.08, 0.035, 0.05)));
+    if (top > 0.5) {
+      // From the foot of one post to near the top of the other.
+      const a = v.clone().addScaledVector(r, -half).setY(0.05);
+      const b = v.clone().addScaledVector(r, half).setY(top - 0.08);
+      const d = new THREE.Vector3().subVectors(b, a);
+      const q2 = new THREE.Quaternion().setFromUnitVectors(up, d.clone().normalize());
+      timber.push(new THREE.Matrix4().compose(a.clone().addScaledVector(d, 0.5), q2, new THREE.Vector3(0.025, d.length(), 0.025)));
     }
   }
-  const postMesh = new THREE.InstancedMesh(postGeo, mat('#7a5638'), Math.max(1, posts.length));
-  posts.forEach((p, i) => postMesh.setMatrixAt(i, p));
-  postMesh.count = posts.length;
-  postMesh.castShadow = true;
-  g.add(postMesh);
+  const instanced = (list: THREE.Matrix4[], m: THREE.Material) => {
+    const im = new THREE.InstancedMesh(unit, m, Math.max(1, list.length));
+    list.forEach((p, i) => im.setMatrixAt(i, p));
+    im.count = list.length;
+    im.castShadow = true;
+    im.receiveShadow = true;
+    g.add(im);
+  };
+  instanced(timber, mat('#7a5638'));
+  instanced(footings, mat('#bdb8ae'));
 
   // Station platform.
   for (const tp of track.filter((t) => PIECES[t.piece].station)) {
