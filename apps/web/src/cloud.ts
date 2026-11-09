@@ -117,10 +117,38 @@ export class Cloud {
   }
 
   /** Your park's state on NEAR (escrow, earnings, settlements), if settlement is on. */
-  async chain(): Promise<{ enabled: boolean; contract?: string; park?: { owner: string; balance: string; earned: string; settlements: number } | null } | null> {
+  async chain(): Promise<{ enabled: boolean; contract?: string; claimed?: boolean; claimable?: boolean; park?: { owner: string; balance: string; earned: string; settlements: number } | null } | null> {
     if (!this.link) return null;
     const res = await fetch(`/api/parks/${this.link.id}/chain`).catch(() => null);
     return res?.ok ? res.json() : null;
+  }
+
+  /**
+   * Claim this park on NEAR: the server checks this browser published it (the park key) and that the
+   * wallet signed its one-time challenge, then assigns the park to that account on chain.
+   */
+  async claim(): Promise<string> {
+    if (!this.link) throw new Error('publish the park first');
+    const { connect, signClaim } = await import('./wallet.ts');
+    const { wallet, accountId } = await connect();
+    const post = async (path: string, body: unknown) => {
+      const res = await fetch(`/api/parks/${this.link!.id}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-park-key': this.link!.key }, body: JSON.stringify(body) });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error ?? `claim failed (${res.status})`);
+      return out;
+    };
+    const ch = await post('claim/challenge', {});
+    const signed = await signClaim(wallet, accountId, ch);
+    const out = await post('claim', { signed: { accountId: signed.accountId, publicKey: signed.publicKey, signature: signed.signature }, nonce: ch.nonce });
+    return out.owner as string;
+  }
+
+  /** Withdraw the park's escrow to its owner (signed in the owner's wallet). */
+  async withdraw(): Promise<void> {
+    if (!this.link) throw new Error('publish the park first');
+    const { connect, withdraw } = await import('./wallet.ts');
+    const { wallet, accountId } = await connect();
+    await withdraw(wallet, accountId, this.link.id);
   }
 
   /** Has the server replayed this park's actions and got exactly this save? (Only verified parks settle and rank.) */
