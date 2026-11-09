@@ -502,28 +502,36 @@ export class World {
   private tmp = { m: new THREE.Matrix4(), h: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(1, 1, 1), p: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color() };
   private chains = new Map<number, [number, number][]>();
   private chainsVersion = -1;
+  /** Queue spots this frame: visitor id → slot in queueX/queueY. Reused every frame (no per-frame garbage). */
+  private queueSlot = new Map<number, number>();
+  private queueX = new Float32Array(MAX_PEOPLE);
+  private queueY = new Float32Array(MAX_PEOPLE);
 
   private syncPeople(st: ParkState, alpha: number) {
     const { p } = this.tmp;
     if (this.chainsVersion !== st.mapVersion) { this.chains.clear(); this.chainsVersion = st.mapVersion; }
     const queueSlots = this.chains;
-    const queuePos = new Map<number, [number, number, number]>();
+    const slots = this.queueSlot, qx = this.queueX, qy = this.queueY;
+    slots.clear();
+    let qn = 0;
     for (const r of st.rides) {
       if (!r.queue.length) continue;
       let chain = queueSlots.get(r.id);
       if (!chain) { chain = queueChain(st, r); queueSlots.set(r.id, chain); }
-      r.queue.forEach((vid, i) => {
-        const tile = chain![Math.floor(i / 8)] ?? [r.ex, r.ey];
+      for (let i = 0; i < r.queue.length && qn < MAX_PEOPLE; i++) {
+        const tile = chain[Math.floor(i / 8)];
         const slot = i % 8;
-        queuePos.set(vid, [tile[0] + 0.2 + (slot % 4) * 0.2, tile[1] + 0.3 + Math.floor(slot / 4) * 0.4, 0]);
-      });
+        qx[qn] = (tile ? tile[0] : r.ex) + 0.2 + (slot % 4) * 0.2;
+        qy[qn] = (tile ? tile[1] : r.ey) + 0.3 + Math.floor(slot / 4) * 0.4;
+        slots.set(r.queue[i], qn++);
+      }
     }
     const crowd = this.crowd;
     crowd.begin();
     for (const v of st.visitors) {
       if (v.mode === 'riding' || v.mode === 'gone') continue;
-      const qp = queuePos.get(v.id);
-      if (v.mode === 'queuing' && qp) p.set(qp[0], 0, qp[1]);
+      const qi = v.mode === 'queuing' ? slots.get(v.id) : undefined;
+      if (qi !== undefined) p.set(qx[qi], 0, qy[qi]);
       else {
         const f = Math.min(1, (v.p + alpha * 2) / SUB);
         const lane = ((v.id * 37) % 7) / 7 - 0.43;
@@ -552,7 +560,7 @@ export class World {
   }
 
   private syncLitter(st: ParkState) {
-    const m = new THREE.Matrix4();
+    const m = this.tmp.m;
     let n = 0;
     for (let k = 0; k < st.litter.length; k++) {
       const c = Math.min(3, st.litter[k]);
