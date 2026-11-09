@@ -10,3 +10,5 @@ coverage/
 saves/
 assets/blender/*.blend1
 mods/workspace/
+__pycache__/
+*.pyc
