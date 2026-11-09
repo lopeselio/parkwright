@@ -2,7 +2,7 @@
 // would lay (trackPath with the piece appended), the tiles it would take, and an arrow for where the
 // track heads next. Green if the piece fits, red if it doesn't.
 import * as THREE from 'three';
-import { PIECES, TILE_M, endPose, nextPose, pieceTiles, trackPath, type TrackPiece } from '@parkwright/sim';
+import { LEVEL_M, PIECES, TILE_M, endPose, isClosed, nextPose, pieceTiles, trackPath, type TrackPiece } from '@parkwright/sim';
 
 const M = 1 / TILE_M;
 const GAUGE = 0.11;
@@ -30,6 +30,9 @@ export function pieceGhost(track: TrackPiece[], pieceId: string, ok: boolean): T
   const first = all.findIndex((p) => p.piece === idx);
   if (first < 0) return g;
   const pts = all.slice(Math.max(0, first - 1)).filter((p, i) => i === 0 || p.piece === idx);
+  // The closing piece: run the rails right into the station.
+  if (isClosed(tmp) && all.length) pts.push(all[0]);
+  let tipY = end.z * LEVEL_M * M + 0.12;
   const vecs = pts.map((p) => new THREE.Vector3(p.x * M, p.y * M + 0.12, p.z * M));
   if (vecs.length >= 2) {
     const right = vecs.map((v, i) => {
@@ -44,6 +47,7 @@ export function pieceGhost(track: TrackPiece[], pieceId: string, ok: boolean): T
     }
     // A post under the end so you can read the height.
     const tip = vecs[vecs.length - 1];
+    tipY = tip.y;
     if (tip.y > 0.25) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.04, tip.y, 0.04), look(ok, 0.35));
       post.position.set(tip.x, tip.y / 2, tip.z);
@@ -63,7 +67,8 @@ export function pieceGhost(track: TrackPiece[], pieceId: string, ok: boolean): T
   arrow.rotation.set(Math.PI / 2, 0, 0);
   const holder = new THREE.Group();
   holder.add(arrow);
-  holder.position.set(nxt.x + 0.5 - DX[nxt.dir] * 0.25, nxt.z * 2 * M + 0.3, nxt.y + 0.5 - DY[nxt.dir] * 0.25);
+  // Sits on the rail tip (the smoothed height the train actually rides), pointing the way the track continues.
+  holder.position.set(nxt.x + 0.5 - DX[nxt.dir] * 0.25, tipY + 0.18, nxt.y + 0.5 - DY[nxt.dir] * 0.25);
   holder.rotation.y = Math.atan2(DX[nxt.dir], DY[nxt.dir]);
   g.add(holder);
   g.renderOrder = 10;
