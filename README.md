@@ -9,6 +9,12 @@ Work in progress. See DESIGN.md.
 - Hosted (testnet demo): https://parkwright.whitemeadow-d4da3d5d.northeurope.azurecontainerapps.io/
 - Local: `pnpm install`, then `pnpm --filter @parkwright/web dev` and open http://localhost:5180.
 
+## First run
+
+- Do: open the game. See: a title screen with **Continue**, **New park** (pick Meadow or Sandbox and name your park) and **How to play**.
+- Do: start a park. See: a four-card welcome (Next/Back/Skip, arrow keys, Esc). Then **Show me how** starts a hands-on walkthrough that highlights each control and waits for you: pick Path, drag a path from the gate, open Rides, place a ride, place a stall, inspect it, speed up time. **End tour** stops it at any point.
+- Do: press `?` or the **?** button in the top bar. See: the rules and controls sheet, with buttons to replay the welcome, restart the walkthrough or start a new park. Add `?play` to the URL to skip the title screen.
+
 Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 24 40`, then `ride build teacups 21 34 --rot 1`, then `ride open teacups`. Visitors walk in from the gate and queue for the ride.
 
 ## Host it
@@ -17,7 +23,7 @@ Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 2
 
 ## NEAR (testnet)
 
-Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEAR account (`p0`–`p7.parkwright.testnet`), whose only key can call `settle_day` and nothing else. When a park syncs to the cloud, each agent settles its visitors' spend for every finished day into the park, on the contract `park.parkwright.testnet`.
+Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEAR account (`g0`–`g7.parkwright.testnet`), whose only key can call `settle_day` and nothing else. When a park syncs to the cloud, each agent settles its visitors' spend for every finished day into the park, on the contract `park.parkwright.testnet`.
 
 - Do: open the game, build a ride, press **Parks → Publish & share**, and let two in-game days pass. See: the Parks panel shows "On NEAR testnet" with the credits settled into your park, and a link to the contract on NearBlocks.
 - Do: `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard.
