@@ -1,16 +1,22 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
+import { DX, DY, SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
 import { loadModel } from './assets.ts';
 import { buildCoaster } from './coaster.ts';
+import { Crowd } from './people.ts';
 
 /** Tile (x,y) centre in world space. 1 tile = 1 unit. */
 export const tileCenter = (x: number, y: number) => new THREE.Vector3(x + 0.5, 0, y + 0.5);
 
-const SHIRTS = ['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '#f08fc0', '#ffffff', '#3d5a80', '#ee964b'];
-const SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
+const colours = (list: string[]) => list.map((c) => new THREE.Color(c));
+const SHIRTS = colours(['#e85d5d', '#f2b84b', '#5fb6e8', '#7ccf7a', '#b07ae8', '#f08fc0', '#ffffff', '#3d5a80', '#ee964b']);
+const TROUSERS = colours(['#3b4a6b', '#2f3440', '#6b5a45', '#4f6d8f', '#c9b48a', '#57534e', '#7a3b3b']);
+const SKIN = colours(['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac']);
+const HAIR = colours(['#2b2018', '#4a3020', '#7a5230', '#c9a060', '#1c1c1c', '#8a3a20', '#9a9a9a']);
+const ROLE = { handyman: '#2f7d4f', mechanic: '#d06a1f', guard: '#2b3f7a', entertainer: '#e04fa0' } as const;
+const STAFF_TROUSERS = new THREE.Color('#2b2f38');
 
 const accents = new Map<string, THREE.Material>();
 function accent(base: THREE.Material, color: string) {
@@ -48,9 +54,8 @@ export class World {
   private queueMesh: THREE.InstancedMesh;
   private binMesh: THREE.InstancedMesh;
   private litterMesh: THREE.InstancedMesh;
-  private bodies: THREE.InstancedMesh;
-  private heads: THREE.InstancedMesh;
-  private staffMesh: THREE.InstancedMesh;
+  private crowd: Crowd;
+  private staff: Crowd;
   private rides = new Map<number, RideView>();
   private scenery = new Map<number, THREE.Object3D>();
   private gate: THREE.Group;
@@ -117,14 +122,8 @@ export class World {
     this.litterMesh.count = 0;
     this.scene.add(this.binMesh, this.litterMesh);
 
-    this.bodies = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.07, 0.16, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
-    this.heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 6, 5), new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), MAX_PEOPLE);
-    this.staffMesh = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.08, 0.18, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.6, flatShading: true }), MAX_STAFF);
-    for (const m of [this.bodies, this.heads, this.staffMesh]) { m.castShadow = true; m.count = 0; m.frustumCulled = false; this.scene.add(m); }
-    for (let i = 0; i < MAX_PEOPLE; i++) {
-      this.bodies.setColorAt(i, new THREE.Color(SHIRTS[i % SHIRTS.length]));
-      this.heads.setColorAt(i, new THREE.Color(SKIN[(i * 7) % SKIN.length]));
-    }
+    this.crowd = new Crowd(MAX_PEOPLE, this.scene);
+    this.staff = new Crowd(MAX_STAFF, this.scene, 1.08);
 
     this.gate = this.buildGate();
     this.scene.add(this.gate);
@@ -335,8 +334,7 @@ export class World {
   private chainsVersion = -1;
 
   private syncPeople(st: ParkState, alpha: number) {
-    const { m, h, q, sc, p, up } = this.tmp;
-    let n = 0;
+    const { p } = this.tmp;
     if (this.chainsVersion !== st.mapVersion) { this.chains.clear(); this.chainsVersion = st.mapVersion; }
     const queueSlots = this.chains;
     const queuePos = new Map<number, [number, number, number]>();
@@ -350,8 +348,10 @@ export class World {
         queuePos.set(vid, [tile[0] + 0.2 + (slot % 4) * 0.2, tile[1] + 0.3 + Math.floor(slot / 4) * 0.4, 0]);
       });
     }
+    const crowd = this.crowd;
+    crowd.begin();
     for (const v of st.visitors) {
-      if (v.mode === 'riding' || v.mode === 'gone' || n >= MAX_PEOPLE) continue;
+      if (v.mode === 'riding' || v.mode === 'gone') continue;
       const qp = queuePos.get(v.id);
       if (v.mode === 'queuing' && qp) p.set(qp[0], 0, qp[1]);
       else {
@@ -360,32 +360,25 @@ export class World {
         const ox = v.ny !== v.ty ? lane * 0.5 : 0, oz = v.nx !== v.tx ? lane * 0.5 : 0;
         p.set(v.tx + (v.nx - v.tx) * f + 0.5 + ox, 0, v.ty + (v.ny - v.ty) * f + 0.5 + oz);
       }
-      const bob = v.mode === 'queuing' ? 0 : Math.abs(Math.sin((v.p + v.id) * 0.4)) * 0.03;
-      q.setFromAxisAngle(up, [Math.PI, -Math.PI / 2, 0, Math.PI / 2][v.dir]);
-      p.y = 0.17 + bob;
-      m.compose(p, q, sc);
-      p.y = 0.36 + bob;
-      h.compose(p, q, sc);
-      this.bodies.setMatrixAt(n, m);
-      this.heads.setMatrixAt(n, h);
-      n++;
+      const walking = v.mode !== 'queuing';
+      const step = (v.p + alpha * 2 + v.id) * 0.4;
+      p.y = walking ? Math.abs(Math.sin(step)) * 0.018 : 0;
+      const id = v.id;
+      crowd.add(p, Math.atan2(DX[v.dir], DY[v.dir]), walking ? Math.sin(step) * 0.5 : 0,
+        SHIRTS[id % SHIRTS.length], TROUSERS[(id * 5) % TROUSERS.length], SKIN[(id * 7) % SKIN.length], HAIR[(id * 3) % HAIR.length]);
     }
-    this.bodies.count = n; this.heads.count = n;
-    this.bodies.instanceMatrix.needsUpdate = true; this.heads.instanceMatrix.needsUpdate = true;
-    const roleColor = { handyman: '#2f7d4f', mechanic: '#d06a1f', guard: '#2b3f7a', entertainer: '#e04fa0' } as const;
-    let ns = 0;
+    crowd.end();
+    const staff = this.staff;
+    staff.begin();
     for (const s of st.staff) {
-      if (ns >= MAX_STAFF) break;
       const f = Math.min(1, s.p / SUB);
-      p.set(s.tx + (s.nx - s.tx) * f + 0.5, 0.2, s.ty + (s.ny - s.ty) * f + 0.5);
-      m.compose(p, q.identity(), sc);
-      this.staffMesh.setMatrixAt(ns, m);
-      this.staffMesh.setColorAt(ns, this.tmp.c.set(roleColor[s.role]));
-      ns++;
+      const dx = s.nx - s.tx, dy = s.ny - s.ty, moving = dx !== 0 || dy !== 0;
+      p.set(s.tx + dx * f + 0.5, 0, s.ty + dy * f + 0.5);
+      const step = (s.p + alpha * 2 + s.id) * 0.4;
+      staff.add(p, moving ? Math.atan2(dx, dy) : 0, moving ? Math.sin(step) * 0.5 : 0,
+        this.tmp.c.set(ROLE[s.role]), STAFF_TROUSERS, SKIN[(s.id * 7) % SKIN.length], HAIR[(s.id * 3) % HAIR.length]);
     }
-    this.staffMesh.count = ns;
-    this.staffMesh.instanceMatrix.needsUpdate = true;
-    if (this.staffMesh.instanceColor) this.staffMesh.instanceColor.needsUpdate = true;
+    staff.end();
   }
 
   private syncLitter(st: ParkState) {
