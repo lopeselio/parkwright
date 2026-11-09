@@ -35,6 +35,15 @@ export class Cloud {
     return !!this.link && !this.conflict && !this.game.visiting;
   }
 
+  /** Unlink from the published park (a new park starts): the published copy stays online but stops updating. */
+  forget() {
+    this.link = null;
+    write(null);
+    this.conflict = false;
+    this.dirty = false;
+    this.status = '';
+  }
+
   async publish(): Promise<string> {
     if (this.game.visiting) throw new Error("you're visiting someone else's park — go back to yours to share it");
     if (this.link) { await this.sync(true); return shareUrl(this.link.id); }
