@@ -18,6 +18,8 @@ export class Hud {
   constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void, private cloud: Cloud) {
     tools.onSelect = (id) => { this.selected = id; this.panel = null; this.renderSide(); };
     tools.onChange = () => this.renderTools();
+    // The terminal, the AI manager or a bridge can change the track too: keep the builder and preview current.
+    game.on((e) => { if (e.kind === 'action' && e.result.ok && this.tools.tool.kind === 'coaster') this.renderTools(); });
     // Never rebuild the side panel between mousedown and mouseup, or the click is lost.
     $('#side').addEventListener('pointerdown', () => { this.pressing = true; });
     addEventListener('pointerup', () => { setTimeout(() => { this.pressing = false; }, 0); });
@@ -119,6 +121,11 @@ export class Hud {
 
   private sideKey = '';
   private pressing = false;
+  /** Builder state that must survive a re-render: the piece under the pointer / with focus, and a touch-armed piece. */
+  private hoverPiece: string | null = null;
+  private focusPiece: string | null = null;
+  private armedPiece: string | null = null;
+  private skipClick = false;
 
   /** Re-render the side panel; on the timer only when what it shows has changed (so clicks aren't lost). */
   private renderCoasterBuilder(d: HTMLElement) {
@@ -145,18 +152,26 @@ export class Hud {
     const show = (piece: string) => {
       const res = this.tools.previewPiece(closed ? null : piece);
       if (!res) { next.replaceChildren(); return; }
-      next.className = `next-piece ${res.ok ? 'ok' : 'bad'}`;
-      next.replaceChildren(h('b', {}, PIECES[piece].name), res.ok ? ` fits · ${cr(res.cost ?? PIECES[piece].cost)}` : ` won't fit: ${res.error}${res.hint ? ` — ${res.hint}` : ''}`);
+      const cost = (res.ok ? res.cost : undefined) ?? PIECES[piece].cost;
+      const broke = res.ok && cost > this.game.s.cash;
+      next.className = `next-piece ${broke ? 'broke' : res.ok ? 'ok' : 'bad'}`;
+      next.replaceChildren(h('b', {}, PIECES[piece].name),
+        broke ? ` fits, but costs ${cr(cost)} and you have ${cr(this.game.s.cash)}` : res.ok ? ` fits · ${cr(cost)}` : ` won't fit: ${res.error}${res.hint ? ` — ${res.hint}` : ''}`);
     };
+    const current = () => this.hoverPiece ?? this.focusPiece ?? this.armedPiece ?? this.tools.lastPiece;
     const pieceBtn = (id: string) => {
       const res = closed ? null : this.tools.pieceCheck(id);
       return h('button', {
-        disabled: closed, class: res && !res.ok ? 'nofit' : '',
+        disabled: closed, class: res && !res.ok ? 'nofit' : '', 'data-piece': id,
         title: `${PIECES[id].name} · ${cr(PIECES[id].cost)}${res && !res.ok ? ` — won't fit: ${res.error}` : ''}`,
-        onclick: () => add(id), onmouseenter: () => show(id), onfocus: () => show(id),
-        onmouseleave: () => show(this.tools.lastPiece), onblur: () => show(this.tools.lastPiece),
+        // Touch has no hover: the first tap previews, a second tap on the same piece places it.
+        onpointerdown: (e: PointerEvent) => { if (e.pointerType === 'touch' && this.armedPiece !== id) { this.armedPiece = id; this.skipClick = true; show(id); } },
+        onclick: () => { if (this.skipClick) { this.skipClick = false; return; } this.armedPiece = null; add(id); },
+        onmouseenter: () => { this.hoverPiece = id; show(id); }, onmouseleave: () => { this.hoverPiece = null; show(current()); },
+        onfocus: () => { this.focusPiece = id; show(id); }, onblur: () => { this.focusPiece = null; show(current()); },
       }, PIECES[id].name.replace(' turn', ''));
     };
+    const refocus = this.focusPiece;
     d.replaceChildren(
       h('h3', {}, r.name),
       h('p', { class: 'tip' }, closed ? 'Circuit closed — run a test to rate it.' : `Open end at ${end!.x},${end!.y}, ${end!.z * 2} m up. Bring it back to the station at ground level.`),
@@ -169,9 +184,11 @@ export class Hud {
           if (res.ok) { this.game.run('ride.open', { ride: r.id }); this.tools.set({ kind: 'select' }); this.selected = r.id; this.renderSide(); }
         } }, 'Test & open'),
       ),
-      h('p', { class: 'tip' }, 'Point at a piece to preview it on the track (green fits, red doesn\'t). Lifts pull the train up; drops and airtime make it exciting; fast tight turns make it intense. Wide turns are gentler but take 2×2 tiles.'),
+      h('p', { class: 'tip' }, 'Point at a piece to preview it on the track (green fits, red doesn\'t); on touch, tap once to preview and again to place. Lifts pull the train up; drops and airtime make it exciting; fast tight turns make it intense. Wide turns are gentler but take 2×2 tiles.'),
     );
-    show(this.tools.lastPiece);
+    // The buttons were rebuilt under a pointer that hasn't moved: keep showing (and focusing) the same piece.
+    if (refocus) (d.querySelector(`button[data-piece="${refocus}"]`) as HTMLButtonElement | null)?.focus();
+    show(current());
   }
 
   private renderSide(force = true) {
