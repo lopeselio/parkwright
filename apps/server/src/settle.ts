@@ -35,7 +35,7 @@ const DAY_SLACK = 2;
 const MAX_DAYS_PER_PASS = 14;
 const doneKey = (park: string) => `settled:${park}`;
 
-export const dayHash = (d: DayStats) => createHash('sha256').update(JSON.stringify(d)).digest('hex').slice(0, 32);
+export const dayHash = (d: Pick<DayStats, 'day' | 'spend'>) => createHash('sha256').update(JSON.stringify(d)).digest('hex').slice(0, 32);
 
 export class Settler {
   log: string[] = [];
@@ -82,10 +82,14 @@ export class Settler {
   async settlePark(parkId: string, deadline = Infinity): Promise<{ settled: number; complete: boolean }> {
     const doc = await this.store.get(parkId);
     if (!doc) return { settled: 0, complete: true };
-    // Only spend the simulation actually produced: the save must replay exactly from its action log.
+    // Only spend the simulation actually produced: the save must replay exactly, and we settle from the
+    // replay's own history — never from numbers in the upload.
+    let replayedHistory: { day: number; spend: Record<string, Record<string, number>> }[] | null = null;
     if (this.verifier) {
+      if (this.now() > deadline) return { settled: 0, complete: false };
       const v = await this.verifier.verify(doc.id, doc.version, doc.save);
-      if (!v.ok) { this.note(`${parkId} v${doc.version} not settled: ${v.reason}`); return { settled: 0, complete: true }; }
+      if (!v.ok || !v.replayed) { this.note(`${parkId} v${doc.version} not settled: ${v.reason}`); return { settled: 0, complete: !v.transient }; }
+      replayedHistory = v.replayed.history;
     }
     // The park must exist on chain and still be in the admin's custody (claimed parks need replay
     // verification before the server will settle client-reported spend into them).
@@ -102,7 +106,7 @@ export class Settler {
     // Same bound as the contract: days can't run ahead of real time since the park was created.
     const maxDay = Math.floor((this.now() - doc.createdAt) / GAME_DAY_MIN_MS) + DAY_SLACK;
     const seen = new Set<number>();
-    const days = (Array.isArray(s.history) ? s.history : [])
+    const days = (replayedHistory ?? (Array.isArray(s.history) ? s.history : []))
       .filter((d) => Number.isInteger(d?.day) && d.day > through && d.day < s.day && d.day <= maxDay && !seen.has(d.day) && seen.add(d.day))
       .sort((a, b) => a.day - b.day)
       .slice(0, MAX_DAYS_PER_PASS);
