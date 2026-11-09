@@ -1,11 +1,12 @@
 // Park sounds, all synthesized with Web Audio (no audio files to download).
 //
-// Sound starts muted until the player's first click or key (browsers block audio before that), follows
+// Sound starts on the player's first click, tap or key (browsers block audio before that), follows
 // what the sim does (sales, arrivals, coaster runs, breakdowns, building, errors) and has a crowd bed
 // whose loudness follows how many visitors are in the park. M or the 🔊 button mutes; that's remembered.
 import type { Game } from './game.ts';
 
 const MUTE_KEY = 'parkwright.mute.v1';
+const income = (s: { ledgerTotal: Record<string, number> }) => s.ledgerTotal.gate + s.ledgerTotal.rides + s.ledgerTotal.stalls;
 
 function readMuted(): boolean {
   try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
@@ -20,23 +21,44 @@ export class ParkAudio {
   onChange: () => void = () => {};
 
   /** Last values seen, to turn sim state into one-shot sounds. */
-  private seen = { cash: NaN, visitors: -1, park: '' as unknown, log: 0, cycles: new Map<number, number>(), status: new Map<number, string>() };
+  private seen = { income: NaN, visitors: -1, park: '' as unknown, log: 0, cycles: new Map<number, number>(), status: new Map<number, string>() };
+  /** The crowd level last asked for (automation events are only added when it changes). */
+  private crowdLevel = -1;
   /** Rate limits per sound (ms timestamps). */
   private last = new Map<string, number>();
 
   constructor(private game: Game) {
-    const unlock = () => { this.start(); removeEventListener('pointerdown', unlock, true); removeEventListener('keydown', unlock, true); };
-    addEventListener('pointerdown', unlock, true);
-    addEventListener('keydown', unlock, true);
+    // Browsers only let audio start from a user activation: a key, or the END of a touch/click (pointerdown
+    // doesn't count on phones). Keep trying on each one until the context is actually running.
+    const gestures = ['pointerup', 'touchend', 'keydown'] as const;
+    const unlock = () => {
+      this.start();
+      if (this.ctx && this.ctx.state !== 'running' && !this.muted && !document.hidden) void this.ctx.resume().catch(() => {});
+      if (this.ctx?.state === 'running' || this.muted) for (const g of gestures) removeEventListener(g, unlock, true);
+    };
+    for (const g of gestures) addEventListener(g, unlock, true);
+    this.unlock = unlock;
     addEventListener('pw:toast', (e) => { if ((e as CustomEvent).detail === 'err') this.play('error'); });
-    document.addEventListener('visibilitychange', () => { if (this.ctx) void (document.hidden ? this.ctx.suspend() : this.ctx.resume()); });
+    document.addEventListener('visibilitychange', () => this.sync());
+  }
+
+  private unlock: () => void = () => {};
+  private failed = false;
+
+  /** Run the context only while it's wanted: not muted and the tab visible (no CPU spent on silence). */
+  private sync() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (this.muted || document.hidden) void ctx.suspend().catch(() => {});
+    else void ctx.resume().catch(() => {});
   }
 
   private start() {
-    if (this.ctx) return;
+    if (this.ctx || this.failed || this.muted) return;
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
+    if (!AC) { this.failed = true; return; }
+    let ctx: AudioContext;
+    try { ctx = new AC(); } catch { this.failed = true; return; }
     this.ctx = ctx;
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 0.6;
@@ -70,6 +92,12 @@ export class ParkAudio {
     this.muted = !this.muted;
     try { localStorage.setItem(MUTE_KEY, this.muted ? '1' : '0'); } catch { /* private mode */ }
     if (this.ctx && this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.6, this.ctx.currentTime, 0.05);
+    if (!this.muted) {
+      // Unmuting is itself a gesture: start (or resume) here, and listen again in case it's still blocked.
+      this.start();
+      for (const g of ['pointerup', 'touchend', 'keydown']) addEventListener(g, this.unlock, true);
+    }
+    this.sync();
     if (!this.muted) this.play('click');
     this.onChange();
   }
@@ -79,7 +107,7 @@ export class ParkAudio {
     const s = this.game.s;
     if (this.seen.park !== s) {
       // A different park (new, load, visit): start fresh rather than "hearing" the whole park appear.
-      this.seen = { cash: s.cash, visitors: s.visitors.length, park: s, log: this.game.park.log.length, cycles: new Map(), status: new Map() };
+      this.seen = { income: income(s), visitors: s.visitors.length, park: s, log: this.game.park.log.length, cycles: new Map(), status: new Map() };
       for (const r of s.rides) { this.seen.cycles.set(r.id, r.cycle); this.seen.status.set(r.id, r.status); }
       return;
     }
@@ -87,8 +115,8 @@ export class ParkAudio {
     const log = this.game.park.log;
     const fresh = log.length > this.seen.log ? log.slice(this.seen.log) : [];
     this.seen.log = log.length;
-    if (!this.ctx || this.muted) {
-      this.seen.cash = s.cash;
+    if (!this.ctx || this.muted || this.ctx.state !== 'running') {
+      this.seen.income = income(s);
       this.seen.visitors = s.visitors.length;
       for (const r of s.rides) { this.seen.cycles.set(r.id, r.cycle); this.seen.status.set(r.id, r.status); }
       return;
@@ -98,13 +126,20 @@ export class ParkAudio {
     // Crowd loudness: grows with visitors, quiet when paused.
     const n = s.visitors.length;
     const target = this.game.speed === 0 ? 0 : Math.min(0.09, Math.sqrt(n) * 0.006);
-    this.crowd!.gain.setTargetAtTime(target, t, 0.8);
+    if (Math.abs(target - this.crowdLevel) > 0.002) { this.crowd!.gain.setTargetAtTime(target, t, 0.8); this.crowdLevel = target; }
 
-    if (s.cash > this.seen.cash) this.play('coin');
-    this.seen.cash = s.cash;
+    // Coins for money visitors spend (gate, rides, stalls) — not loans or refunds.
+    const inc = income(s);
+    if (inc > this.seen.income) this.play('coin');
+    this.seen.income = inc;
     if (n > this.seen.visitors) this.play('arrive');
     this.seen.visitors = n;
 
+    if (this.seen.cycles.size > s.rides.length) {
+      // Demolished rides: forget them.
+      const ids = new Set(s.rides.map((r) => r.id));
+      for (const id of [...this.seen.cycles.keys()]) if (!ids.has(id)) { this.seen.cycles.delete(id); this.seen.status.delete(id); }
+    }
     for (const r of s.rides) {
       const prevCycle = this.seen.cycles.get(r.id);
       const prevStatus = this.seen.status.get(r.id);
@@ -127,7 +162,7 @@ export class ParkAudio {
   play(kind: 'coin' | 'arrive' | 'ride' | 'coaster' | 'breakdown' | 'place' | 'build' | 'demolish' | 'click' | 'error') {
     const ctx = this.ctx;
     if (!ctx || this.muted || !this.master) return;
-    const gap = { coin: 140, arrive: 900, ride: 600, coaster: 2500, breakdown: 1500, place: 60, build: 80, demolish: 120, click: 40, error: 300 }[kind];
+    const gap = { coin: 400, arrive: 900, ride: 600, coaster: 2500, breakdown: 1500, place: 60, build: 80, demolish: 120, click: 40, error: 300 }[kind];
     const now = performance.now();
     if (now - (this.last.get(kind) ?? -1e9) < gap) return;
     this.last.set(kind, now);
