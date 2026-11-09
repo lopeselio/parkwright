@@ -117,6 +117,9 @@ export class Game {
   get s() { return this.park.s; }
 
   newGame(scenario: string, name: string) {
+    // A new park is always your own: leave any park you were visiting, with your own mods.
+    this.visiting = false;
+    this.setMods(readMods());
     this.park = Park.create(this.content, scenario, (Math.random() * 2 ** 31) | 0, name);
     this.park.hooks = this.hooks();
     this.fullLog = true;
