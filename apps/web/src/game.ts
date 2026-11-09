@@ -66,6 +66,9 @@ export class Game {
 
   /** Load a validated mod into the running park. Returns why not, or null. */
   applyMod(mod: ModFile): string | null {
+    // A park whose mods change mid-game can't be replayed from its log alone (mod rules would apply from
+    // tick 0), so it stops being verifiable. Mod changes aren't actions yet.
+    const marksUnverifiable = this.s.tick > 0;
     if (this.visiting) return "you're visiting someone else's park — go back to yours to change mods";
     // Replacing a mod with the same name must not pull out rides or items the park still uses.
     const old = this.mods.find((m) => m.pack.id === mod.pack.id);
@@ -77,6 +80,7 @@ export class Game {
       if (lost.length) return `a mod called ${mod.pack.name} is already loaded and the park uses ${lost.map((r) => r.name).join(', ')} from it — rename the new one or demolish those first`;
     }
     this.setMods([...this.mods.filter((m) => m.pack.id !== mod.pack.id), mod]);
+    if (marksUnverifiable) this.fullLog = false;
     writeMods(this.mods);
     this.saveLocal();
     return null;
@@ -94,6 +98,7 @@ export class Game {
     const dependents = this.mods.filter((x) => x !== m && x.pack.rideTypes.some((t) => t.item && items.has(t.item)));
     if (dependents.length) return `${dependents.map((d) => d.pack.name).join(', ')} sells items from this mod — remove that first`;
     this.setMods(this.mods.filter((x) => x !== m));
+    if (this.s.tick > 0) this.fullLog = false;
     writeMods(this.mods);
     return null;
   }
@@ -181,7 +186,8 @@ export class Game {
   }
 
   toSave(): SaveFile {
-    const fullLog = this.fullLog && this.park.log.length <= MAX_LOG;
+    // A log too big to publish (the server takes ≤ 1.8 MB per save) can't be verified, so say so up front.
+    const fullLog = this.fullLog && this.park.log.length <= MAX_LOG && JSON.stringify(this.park.log).length < 1_200_000;
     return { v: 1, snapshot: this.park.snapshot(), log: this.park.log.slice(-MAX_LOG), savedAt: Date.now(), fullLog, ...(this.mods.length ? { mods: this.mods } : {}) };
   }
 
