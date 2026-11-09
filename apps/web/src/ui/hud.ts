@@ -90,6 +90,7 @@ export class Hud {
     );
     const d = $('#drawer');
     if (t.kind === 'coaster') { d.classList.add('open'); this.renderCoasterBuilder(d); return; }
+    this.tools.previewPiece(null);
     if (!this.drawer) { d.classList.remove('open'); return; }
     d.classList.add('open');
     const c = this.game.content;
@@ -124,6 +125,7 @@ export class Hud {
     const r = this.tools.building();
     const t = this.tools.tool as { kind: 'coaster'; dir: Dir };
     if (!r) {
+      this.tools.previewPiece(null);
       d.replaceChildren(
         h('h3', {}, 'Timber Coaster'),
         h('p', { class: 'tip' }, `Click a tile to place the 3-tile station heading ${['north', 'east', 'south', 'west'][t.dir]}. R turns it. The entrance goes on its left.`),
@@ -133,12 +135,33 @@ export class Hud {
     }
     const closed = isClosed(r.track!);
     const end = endPose(r.track!);
-    const add = (piece: string) => this.tools.coaster('coaster.add', { piece, ride: r.id }, `pw coaster add ${piece}`);
+    const add = (piece: string) => {
+      const res = this.tools.coaster('coaster.add', { piece, ride: r.id }, `pw coaster add ${piece}`);
+      if (res.ok) this.tools.lastPiece = piece;
+    };
     const groups: [string, string[]][] = [['Straight', ['straight', 'lift', 'brakes']], ['Turns', ['left', 'right', 'bigleft', 'bigright']], ['Hills', ['up', 'down', 'steepup', 'steepdown']]];
+    // The next-piece preview: the piece you point at (or focus), else the last one you added.
+    const next = h('p', { class: 'next-piece' });
+    const show = (piece: string) => {
+      const res = this.tools.previewPiece(closed ? null : piece);
+      if (!res) { next.replaceChildren(); return; }
+      next.className = `next-piece ${res.ok ? 'ok' : 'bad'}`;
+      next.replaceChildren(h('b', {}, PIECES[piece].name), res.ok ? ` fits · ${cr(res.cost ?? PIECES[piece].cost)}` : ` won't fit: ${res.error}${res.hint ? ` — ${res.hint}` : ''}`);
+    };
+    const pieceBtn = (id: string) => {
+      const res = closed ? null : this.tools.pieceCheck(id);
+      return h('button', {
+        disabled: closed, class: res && !res.ok ? 'nofit' : '',
+        title: `${PIECES[id].name} · ${cr(PIECES[id].cost)}${res && !res.ok ? ` — won't fit: ${res.error}` : ''}`,
+        onclick: () => add(id), onmouseenter: () => show(id), onfocus: () => show(id),
+        onmouseleave: () => show(this.tools.lastPiece), onblur: () => show(this.tools.lastPiece),
+      }, PIECES[id].name.replace(' turn', ''));
+    };
     d.replaceChildren(
       h('h3', {}, r.name),
       h('p', { class: 'tip' }, closed ? 'Circuit closed — run a test to rate it.' : `Open end at ${end!.x},${end!.y}, ${end!.z * 2} m up. Bring it back to the station at ground level.`),
-      ...groups.map(([label, ids]) => h('div', { class: 'pieces' }, h('label', {}, label), ...ids.map((id) => h('button', { disabled: closed, title: `${PIECES[id].name} · ${cr(PIECES[id].cost)}`, onclick: () => add(id) }, PIECES[id].name.replace(' turn', ''))))),
+      ...groups.map(([label, ids]) => h('div', { class: 'pieces' }, h('label', {}, label), ...ids.map(pieceBtn))),
+      next,
       h('div', { class: 'row' },
         h('button', { onclick: () => this.tools.coaster('coaster.undo', { ride: r.id }, 'pw coaster undo') }, 'Undo'),
         h('button', { class: 'primary', disabled: !closed, onclick: () => {
@@ -146,8 +169,9 @@ export class Hud {
           if (res.ok) { this.game.run('ride.open', { ride: r.id }); this.tools.set({ kind: 'select' }); this.selected = r.id; this.renderSide(); }
         } }, 'Test & open'),
       ),
-      h('p', { class: 'tip' }, 'Lifts pull the train up; drops and airtime make it exciting; fast tight turns make it intense. Wide turns are gentler but take 2×2 tiles.'),
+      h('p', { class: 'tip' }, 'Point at a piece to preview it on the track (green fits, red doesn\'t). Lifts pull the train up; drops and airtime make it exciting; fast tight turns make it intense. Wide turns are gentler but take 2×2 tiles.'),
     );
+    show(this.tools.lastPiece);
   }
 
   private renderSide(force = true) {

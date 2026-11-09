@@ -170,3 +170,7 @@ button.link { border: none; background: none; color: var(--muted); text-decorati
 .ob-wait { font-size: 12px; color: var(--accent); animation: ob-pulse 1.4s ease-in-out infinite; }
 @keyframes ob-pulse { 50% { opacity: 0.4; } }
 @media (prefers-reduced-motion: reduce) { .ob-overlay, .ob-overlay > *, .ob-wait, .ob-ring { animation: none; transition: none; } }
+.pieces button.nofit { opacity: 0.55; text-decoration: line-through; text-decoration-color: rgb(200 60 60 / 0.6); }
+.next-piece { min-height: 2.6em; margin: 6px 0; font-size: 13px; line-height: 1.35; }
+.next-piece.ok { color: var(--good); }
+.next-piece.bad { color: #b8423a; }

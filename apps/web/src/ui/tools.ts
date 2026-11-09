@@ -3,6 +3,7 @@ import { rotatedSize, entranceFor, sceneryByName, stationEntrance, type Dir } fr
 import type { Game } from '../game.ts';
 import type { World } from '../render/world.ts';
 import { mat } from '../render/models.ts';
+import { disposeGhost, pieceGhost } from '../render/coaster-ghost.ts';
 import { toast } from './dom.ts';
 
 export type Tool =
@@ -81,6 +82,27 @@ export class Tools {
   /** The coaster currently under construction (untested), if any. */
   building() {
     return [...this.game.s.rides].reverse().find((r) => r.track && !r.ratings);
+  }
+
+  private nextPiece = new THREE.Group();
+  /** The piece the builder previews when you're not pointing at one: the last one you added. */
+  lastPiece = 'straight';
+
+  /** Would this piece fit at the open end of the coaster being built? (Same check the sim runs.) */
+  pieceCheck(piece: string) {
+    const r = this.building();
+    return r ? this.game.park.query('coaster.add', { piece, ride: r.id }) : null;
+  }
+
+  /** Show the see-through next piece at the open end (null hides it). */
+  previewPiece(piece: string | null) {
+    if (!this.nextPiece.parent) this.world.scene.add(this.nextPiece);
+    for (const c of [...this.nextPiece.children]) { disposeGhost(c); this.nextPiece.remove(c); }
+    const r = this.building();
+    if (!piece || !r?.track) return null;
+    const res = this.pieceCheck(piece)!;
+    if (res.ok || !/already closed/.test(res.error)) this.nextPiece.add(pieceGhost(r.track, piece, res.ok));
+    return res;
   }
 
   /** Run a coaster action from the builder panel. */
