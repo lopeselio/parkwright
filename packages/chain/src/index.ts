@@ -9,7 +9,14 @@ export const CONTRACT = process.env.PARK_CONTRACT_ID ?? 'park.parkwright.testnet
 export const ADMIN = process.env.PARK_ADMIN_ID ?? 'parkwright.testnet';
 /** One patron agent per visitor group in the sim (visitors.ts PATRON_GROUPS). */
 export const PATRON_GROUPS = 8;
-export const patronAccount = (group: number) => `p${group}.${ADMIN}`;
+/**
+ * Patron accounts are `<prefix><group>.<admin>`. Generation "g" (no lifetime gas allowance) replaced the
+ * original "p" accounts, whose keys had a 0.12 NEAR allowance and can't be rekeyed.
+ */
+export const PATRON_PREFIX = process.env.PATRON_PREFIX ?? 'g';
+export const patronAccount = (group: number, prefix = PATRON_PREFIX) => `${prefix}${group}.${ADMIN}`;
+/** The retired first generation, deactivated on chain. */
+export const RETIRED_PATRONS = Array.from({ length: 8 }, (_, g) => patronAccount(g, 'p'));
 export const PATRONS = Array.from({ length: PATRON_GROUPS }, (_, g) => patronAccount(g));
 
 /** Most a patron may settle into one park for one day, in credit units (cents). */
