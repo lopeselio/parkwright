@@ -60,14 +60,14 @@ export class Crowd {
   private one = new THREE.Vector3(1, 1, 1);
   private up = new THREE.Vector3(0, 1, 0);
 
-  constructor(readonly capacity: number, scene: THREE.Scene, scale = 1) {
+  constructor(readonly capacity: number, scene: THREE.Scene, scale = 1, shadows = true) {
     this.legs = new THREE.InstancedMesh(legGeometry(), material(), capacity * 2);
     this.torso = new THREE.InstancedMesh(torsoGeometry(), material(), capacity);
     this.head = new THREE.InstancedMesh(headGeometry(), material(0.6), capacity);
     this.hair = new THREE.InstancedMesh(hairGeometry(), material(0.9), capacity);
     this.one.setScalar(scale);
     for (const im of this.meshes()) {
-      im.castShadow = true;
+      im.castShadow = shadows;
       im.count = 0;
       im.frustumCulled = false;
       scene.add(im);
@@ -90,11 +90,12 @@ export class Crowd {
     this.torso.setColorAt(i, shirt);
     this.head.setColorAt(i, skin);
     this.hair.setColorAt(i, hair);
-    for (const s of [-1, 1]) {
+    for (let k = 0; k < 2; k++) {
+      const s = k * 2 - 1;
       this.l.makeRotationX(stride * s).setPosition(s * 0.026, HIP, 0);
       this.r.multiplyMatrices(this.m, this.l);
-      this.legs.setMatrixAt(i * 2 + (s > 0 ? 1 : 0), this.r);
-      this.legs.setColorAt(i * 2 + (s > 0 ? 1 : 0), trousers);
+      this.legs.setMatrixAt(i * 2 + k, this.r);
+      this.legs.setColorAt(i * 2 + k, trousers);
     }
   }
 
