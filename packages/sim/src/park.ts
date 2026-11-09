@@ -6,8 +6,8 @@ import { idx, Routes, SCENERY } from './map.ts';
 import { chance, seedRng } from './rng.ts';
 import { payUpkeep, updateRide, wearRide } from './rides.ts';
 import { updateStaff } from './staff.ts';
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, RULES, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
-import { spawnVisitor, updateVisitor } from './visitors.ts';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, RULES, rulesOf, TICKS_PER_DAY, Tile, type ActionRecord, type DayStats, type ParkState, type Visitor } from './types.ts';
+import { spawnVisitor, updateVisitor, type Crowd } from './visitors.ts';
 
 const beauty = (id: number) => SCENERY[id]?.beauty ?? 0;
 const freshDay = (day: number): DayStats => ({ day, visitors: 0, arrivals: 0, rating: 0, income: 0, rideIncome: 0, costs: 0, spend: {} });
@@ -54,6 +54,8 @@ export class Park {
   private byId = new Map<number, Visitor>();
   private byIdOf: Visitor[] | null = null;
   private byIdLen = 0;
+  /** Reused buffer for the per-tick crowd counts (rules v2+). */
+  private crowdBuf: Uint16Array | null = null;
 
   constructor(public s: ParkState, public c: Content) {
     this.routes = new Routes(() => this.s);
@@ -165,11 +167,24 @@ export class Park {
     s.tick++;
     const rate = arrivalRate(s, c);
     if (chance(s.rng, Math.round(rate * 100), TICKS_PER_DAY * 100)) spawnVisitor(s, c);
-    for (const v of s.visitors) updateVisitor(s, c, this.routes, v);
+    const crowd = this.crowd();
+    for (const v of s.visitors) updateVisitor(s, c, this.routes, v, crowd);
     const byId = this.visitorIndex();
     for (const r of s.rides) updateRide(s, c, r, byId);
     updateStaff(s, c, this.routes);
     if (s.tick % TICKS_PER_DAY === 0) this.endDay();
+  }
+
+  /** Rules v2+: walking visitors per tile at the start of this tick (v1 counts on demand instead). */
+  private crowd(): Crowd {
+    const s = this.s;
+    if (rulesOf(s) < 2) return null;
+    const n = s.w * s.h;
+    if (!this.crowdBuf || this.crowdBuf.length !== n) this.crowdBuf = new Uint16Array(n);
+    const buf = this.crowdBuf;
+    buf.fill(0);
+    for (const v of s.visitors) if (v.mode === 'walking') buf[v.ty * s.w + v.tx]++;
+    return buf;
   }
 
   /** The visitor index, kept in step with s.visitors without rebuilding it every tick. */
