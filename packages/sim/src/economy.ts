@@ -125,6 +125,32 @@ export function weeklyUpkeep(s: ParkState, c: Content, type: string): number {
 export const ARRIVAL_DRAW = 40;
 /** Rules v2: word of mouth. Arrivals start at AWARE_START/AWARE_FULL of demand and reach it after AWARE_FULL − AWARE_START visitors. */
 export const AWARE_START = 1000;
+/** Rules v2: ride draw past this adds no more demand (a park can't grow without limit by adding venues). */
+export const DRAW_CAP = 360;
+/**
+ * Rules v2: the most of one day's visitor spending that counts for on-chain settlement — under the park
+ * contract's 5,000 CR per park-day and 1,000 CR per patron group, with headroom. The park keeps every
+ * cent it takes; only the settlement record (DayStats.spend) is scaled down to fit.
+ */
+export const SETTLE_DAY_CAP = 480_000;
+export const SETTLE_GROUP_CAP = 95_000;
+
+/** Scale a day's spend record (group → venue → cents) to the settlement caps. Integer, deterministic. */
+export function capSpend(spend: Record<string, Record<string, number>>): void {
+  const groupTotal = (g: Record<string, number>) => Object.values(g).reduce((a, b) => a + b, 0);
+  const total = Object.values(spend).reduce((a, g) => a + groupTotal(g), 0);
+  const k = total > SETTLE_DAY_CAP ? SETTLE_DAY_CAP / total : 1;
+  for (const g of Object.values(spend)) {
+    const t = groupTotal(g);
+    if (!t) continue;
+    const target = Math.min(Math.floor(t * k), SETTLE_GROUP_CAP);
+    if (target >= t) continue;
+    for (const venue of Object.keys(g)) g[venue] = Math.floor((g[venue] * target) / t);
+  }
+}
+
+/** Rules v2: the gate turns new visitors away while this many are inside. */
+export const PARK_CAPACITY = 2000;
 export const AWARE_FULL = 6000;
 
 /** Expected arrivals per day. */
@@ -137,10 +163,12 @@ export function arrivalRate(s: ParkState, c: Content, inPark?: number): number {
   if (rulesOf(s) >= 2) {
     // v2: what's on offer drives demand, word of mouth builds with every visitor so far, and a park
     // holds three and a half to five visitors per point of draw before word gets round that it's packed.
-    rate *= 1 + draw / ARRIVAL_DRAW;
+    if (here >= PARK_CAPACITY) return 0;
+    const d = Math.min(draw, DRAW_CAP);
+    rate *= 1 + d / ARRIVAL_DRAW;
     rate *= Math.min(1, (AWARE_START + s.totalVisitors) / AWARE_FULL);
-    if (here > draw * 5) rate /= 3;
-    else if (here > draw * 3.5) rate /= 1.6;
+    if (here > d * 5) rate /= 3;
+    else if (here > d * 3.5) rate /= 1.6;
   } else if (here > draw * 3) rate /= 3;
   else if (here > draw * 2) rate /= 1.6;
   const vfm = valueForMoney(s);
