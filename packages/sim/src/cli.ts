@@ -6,7 +6,8 @@ import { LEVEL_M, PIECES } from './coaster.ts';
 import { idx, queueCapacity, Routes, SCENERY } from './map.ts';
 import type { Park } from './park.ts';
 import { placeRide } from './place.ts';
-import { DAYS_PER_SEASON, DAYS_PER_WEEK, Tile, type LedgerCategory } from './types.ts';
+import { DAYS_PER_SEASON, DAYS_PER_WEEK, objectiveOf, rulesOf, Tile, type LedgerCategory } from './types.ts';
+import type { Objective } from '@parkwright/content';
 
 export interface CliResult {
   ok: boolean;
@@ -49,6 +50,14 @@ function parseArgs(tokens: string[]) {
 const cr = (cents: number) => `${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)} cr`;
 const rating = (x: number) => (x / 100).toFixed(2);
 
+/** A scenario goal in words. */
+export function goalText(o: Objective): string {
+  return o.kind === 'visitors' ? `${o.count.toLocaleString('en')} visitors with rating ≥ ${o.minRating} by day ${o.byDay}`
+    : o.kind === 'parkValue' ? `park value ≥ ${cr(o.value)} by day ${o.byDay}`
+    : o.kind === 'rideIncome' ? `ride income ≥ ${cr(o.perWeek)} a week`
+    : o.kind === 'coasters' ? `${o.count} coasters with excitement ≥ ${rating(o.minExcitement)} by day ${o.byDay}` : 'none (sandbox)';
+}
+
 type Handler = (park: Park, pos: string[], flags: Record<string, string | true>) => CliResult;
 
 interface Cmd {
@@ -80,11 +89,7 @@ export const COMMANDS: Record<string, Cmd> = {
     run(park) {
       const s = park.s, c = park.c;
       const sc = c.scenarios[s.scenario];
-      const o = sc.objective;
-      const goal = o.kind === 'visitors' ? `${o.count} visitors with rating ≥ ${o.minRating} by day ${o.byDay}`
-        : o.kind === 'parkValue' ? `park value ≥ ${cr(o.value)} by day ${o.byDay}`
-        : o.kind === 'rideIncome' ? `ride income ≥ ${cr(o.perWeek)} a week`
-        : o.kind === 'coasters' ? `${o.count} coasters with excitement ≥ ${rating(o.minExcitement)} by day ${o.byDay}` : 'none (sandbox)';
+      const goal = goalText(objectiveOf(sc, rulesOf(s)));
       const lines = [
         statusLine(park),
         `Entry fee ${cr(s.fee)}; rides are worth ${cr(valueForMoney(s))} more than they cost (keep the fee below that).`,

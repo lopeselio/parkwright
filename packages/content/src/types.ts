@@ -100,6 +100,8 @@ export interface Scenario {
   visitorCash: number;
   archetypes: Archetype[];
   objective: Objective;
+  /** A different goal under a later sim rules version (a park keeps the goal of the rules it was made with). */
+  objectives?: Partial<Record<number, Objective>>;
   /** Ride type ids available to build; empty = all. */
   rides: string[];
   /** Pre-laid path tiles. */
