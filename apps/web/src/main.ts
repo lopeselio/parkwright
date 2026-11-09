@@ -10,6 +10,7 @@ import { Hud } from './ui/hud.ts';
 import { Onboarding } from './ui/onboarding.ts';
 import { ParkTerminal } from './ui/terminal.ts';
 import { $, toast } from './ui/dom.ts';
+import { ParkAudio } from './audio.ts';
 
 const game = new Game();
 const canvas = $<HTMLCanvasElement>('#view');
@@ -53,9 +54,21 @@ $('#cam').addEventListener('click', (e) => {
   else tools.rotate();
   canvas.focus(); // so Space or Enter afterwards goes to the game, not back to this button
 });
+// Sound: synthesized in the browser; M or the speaker button mutes (remembered).
+const audio = new ParkAudio(game);
+const muteBtn = $<HTMLButtonElement>('#mute');
+const showMute = () => {
+  muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+  muteBtn.title = audio.muted ? 'Sound off (M)' : 'Sound on (M)';
+  muteBtn.setAttribute('aria-pressed', String(audio.muted));
+  muteBtn.setAttribute('aria-label', audio.muted ? 'Turn sound on' : 'Mute sound');
+};
+audio.onChange = showMute;
+showMute();
+muteBtn.addEventListener('click', () => { audio.toggle(); canvas.focus(); });
 
 // Agents and the AI layer register extra terminal commands on this hook.
-(window as unknown as { parkwright: unknown }).parkwright = { game, world, terminal, tools };
+(window as unknown as { parkwright: unknown }).parkwright = { game, world, terminal, tools, audio };
 
 const keys = new Set<string>();
 addEventListener('keydown', (e) => {
@@ -67,6 +80,7 @@ addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') tools.rotate();
   if (e.key === 'q') world.rotate(-1);
   if (e.key === 'e') world.rotate(1);
+  if (e.key === 'm' || e.key === 'M') { audio.toggle(); return; }
   if (e.key === ' ') { game.speed = game.speed === 0 ? 1 : 0; e.preventDefault(); }
   keys.add(e.key.toLowerCase());
 });
@@ -94,6 +108,7 @@ function step(now: number, dt: number) {
   if (keys.has('d') || keys.has('arrowright')) world.pan(pan, 0);
   const alpha = game.update(dt);
   world.render(now / 1000, alpha);
+  audio.update();
 }
 requestAnimationFrame(frame);
 addEventListener('beforeunload', saveNow);
