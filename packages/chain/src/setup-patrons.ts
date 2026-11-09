@@ -75,7 +75,7 @@ const rotate = process.argv.includes('--rotate-server-key');
 if (!existsSync(serverKeyFile) || rotate) {
   const old = existsSync(serverKeyFile) ? JSON.parse(readFileSync(serverKeyFile, 'utf8')).public_key as string : null;
   const key = generateKey();
-  let tx = near.transaction(ADMIN).addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons'] });
+  let tx = near.transaction(ADMIN).addKey(key.publicKey.toString(), { type: 'functionCall', receiverId: CONTRACT, methodNames: ['register_park', 'set_patron', 'fund_patrons', 'assign_park'] });
   if (old) tx = tx.deleteKey(ADMIN, old);
   await tx.send({ waitUntil: 'FINAL' });
   writeFileSync(serverKeyFile, JSON.stringify({ account_id: ADMIN, public_key: key.publicKey.toString(), private_key: key.secretKey }), { mode: 0o600 });

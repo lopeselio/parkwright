@@ -1,6 +1,6 @@
 // NEAR side of Parkwright: config, read-only views, and the calls the game server makes.
 // The contract enforces the money rules; this package only builds and signs the calls.
-import { Near } from 'near-kit';
+import { Near, verifyNep413Signature, type SignedMessage } from 'near-kit';
 import { FileKeyStore } from 'near-kit/keys/file';
 
 export const NETWORK = (process.env.NEAR_NETWORK ?? 'testnet') as 'testnet';
@@ -91,6 +91,8 @@ export function adminClient(s: Signer = {}) {
     registerPark: (parkId: string, name: string, owner?: string) => call(near, ADMIN, 'register_park', { park_id: parkId, name, owner: owner ?? null }, GAS.admin),
     setPatron: (patron: string, dayCap: number, active = true) => call(near, ADMIN, 'set_patron', { patron, day_cap: String(dayCap), active }, GAS.admin),
     fundPatrons: (patrons: string[], amount: number) => call(near, ADMIN, 'fund_patrons', { patrons, amount: String(amount) }, GAS.admin),
+    /** Hand an unclaimed park to the player who claimed it (admin-held parks only; enforced on chain). */
+    assignPark: (parkId: string, owner: string) => call(near, ADMIN, 'assign_park', { park_id: parkId, owner }, GAS.admin),
   };
 }
 
@@ -109,3 +111,16 @@ export interface PatronOnChain { account: string; balance: string; day_cap: stri
 export const getPark = (parkId: string) => view<ParkOnChain | null>('get_park', { park_id: parkId });
 export const getPatron = (account: string) => view<PatronOnChain | null>('get_patron', { account_id: account });
 export const lastSettledDay = (patron: string, parkId: string) => view<number | null>('last_settled_day', { patron, park_id: parkId });
+
+/** What a player signs to claim a park (NEP-413, through their wallet). */
+export const CLAIM_RECIPIENT = 'parkwright';
+export const claimMessage = (parkId: string) => `Claim Parkwright park ${parkId}`;
+
+/**
+ * Check a wallet's NEP-413 signature over a claim: valid ed25519 signature, and the key is a FULL-ACCESS
+ * key of the account it names (read from chain). The caller owns nonce freshness and single use.
+ */
+export async function verifyClaimSignature(signed: SignedMessage, parkId: string, nonce: Uint8Array): Promise<boolean> {
+  const near = new Near({ network: NETWORK, rpcUrl: RPC });
+  return verifyNep413Signature(signed, { message: claimMessage(parkId), recipient: CLAIM_RECIPIENT, nonce }, { near, nonceValidation: 'none' });
+}
