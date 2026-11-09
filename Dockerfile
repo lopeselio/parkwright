@@ -45,4 +45,4 @@ ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 USER node
 EXPOSE 8080
-CMD ["node", "--experimental-transform-types", "--disable-warning=ExperimentalWarning", "apps/server/src/main.ts"]
+CMD ["node", "--experimental-transform-types", "--disable-warning=ExperimentalWarning", "--import", "./apps/server/src/telemetry.ts", "apps/server/src/main.ts"]
