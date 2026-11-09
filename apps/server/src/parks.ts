@@ -1,11 +1,12 @@
 // /api/parks — cloud saves you can share. Anyone can view a park by id; only the holder of its key can overwrite it.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { basePack, buildContent, validateMod, type Content } from '@parkwright/content';
+import { basePack, buildContent, type Content } from '@parkwright/content';
 import { computeRating, parkValue, type ParkState } from '@parkwright/sim';
 import type { Cache, Layered } from './cache.ts';
 import { ConflictError, validId, type ParkDoc, type Store } from './store.ts';
 import type { Settler } from './settle.ts';
+import { modsFor, type Verifier } from './verify.ts';
 
 export const MAX_BODY = 1_800_000; // under Cosmos' 2 MB item limit
 const WRITES_PER_MIN = 30;
@@ -25,6 +26,25 @@ export interface Deps {
   settler?: Settler;
   /** Read a park's on-chain state (escrow, earnings, settlements). */
   chainPark?: (parkId: string) => Promise<unknown>;
+  /** Replays published parks; only verified ones rank or settle. */
+  verifier?: Verifier;
+}
+
+/** After a save lands: verify it by replay, then (only if it matches) rank it and queue it for settlement. */
+function afterSave(deps: Deps, doc: ParkDoc) {
+  const { verifier, cache, settler } = deps;
+  if (!verifier) {
+    // Verification off (tests, tools): rank and settle as before.
+    void cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
+    void settler?.markDirty(doc.id);
+    return;
+  }
+  void verifier.verify(doc.id, doc.version, doc.save).then(async (r) => {
+    if (!r.ok) { await cache.zrem(boardOf(doc), doc.id).catch(() => {}); return; }
+    await cache.zrem(boardOf({ modded: !doc.modded }), doc.id).catch(() => {});
+    await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
+    await settler?.markDirty(doc.id);
+  }).catch((e) => console.error('[verify]', (e as Error).message));
 }
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -49,14 +69,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 /** The content a save was built with: the base pack plus its own mods, re-validated here (untrusted). */
 export function contentFor(save: any): Content {
-  const packs = [basePack];
-  for (const m of Array.isArray(save?.mods) ? save.mods.slice(0, 8) : []) {
-    try {
-      const { mod } = validateMod({ name: m?.pack?.name, summary: m?.summary, rideTypes: m?.pack?.rideTypes, items: m?.pack?.items, rules: m?.rules }, buildContent(packs));
-      if (!packs.some((p) => p.id === mod.pack.id)) packs.push(mod.pack);
-    } catch { /* an unusable mod contributes nothing; its rides then fail the check below */ }
-  }
-  return buildContent(packs);
+  return buildContent([basePack, ...modsFor(save).map((m) => m.pack)]);
 }
 
 /** Why a save can't be stored (wrong shape, unknown content), or null. */
@@ -123,9 +136,22 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       const r = await docs.read(`park:${member}`, async () => { const d = await store.get(member); return d ? JSON.stringify(publicDoc(d)) : null; });
       if (!r.value) return null;
       const d = JSON.parse(r.value);
-      return { id: d.id, name: d.name, rating: d.rating, value: d.value, visitors: d.visitors, day: d.day };
+      // Only parks whose current version replays exactly are ranked.
+      if (deps.verifier && !(await deps.verifier.status(d.id, d.version))?.ok) return null;
+      return { id: d.id, name: d.name, rating: d.rating, value: d.value, visitors: d.visitors, day: d.day, verified: true };
     }));
     json(res, 200, { parks: rows.filter(Boolean), cache: cache.kind });
+    return true;
+  }
+
+  const verifyMatch = path.match(/^\/api\/parks\/([^/]+)\/verify$/);
+  if (verifyMatch && req.method === 'GET') {
+    const id = verifyMatch[1];
+    if (!validId(id)) { json(res, 400, { error: 'bad park id' }); return true; }
+    const d = await store.get(id);
+    if (!d) { json(res, 404, { error: 'no such park' }); return true; }
+    const r = deps.verifier ? await deps.verifier.status(id, d.version) : null;
+    json(res, 200, { id, version: d.version, verified: r?.ok ?? false, reason: r?.reason ?? (deps.verifier ? 'verification pending' : 'verification is off'), ms: r?.ms ?? null });
     return true;
   }
 
@@ -190,8 +216,8 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       }
       if (!doc) { json(res, 503, { error: 'could not allocate a park id' }); return true; }
       await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-      await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
-      if (deps.settler) void deps.settler.register(doc.id, doc.name).then(() => deps.settler!.markDirty(doc!.id));
+      if (deps.settler) void deps.settler.register(doc.id, doc.name);
+      afterSave(deps, doc);
       json(res, 201, { id: doc.id, key, version: doc.version });
       return true;
     }
@@ -205,10 +231,7 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       throw e;
     }
     await docs.write(`park:${doc.id}`, JSON.stringify(publicDoc(doc)));
-    // A park that gains or loses mods moves boards.
-    await cache.zrem(boardOf({ modded: !doc.modded }), doc.id).catch(() => {});
-    await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
-    await deps.settler?.markDirty(doc.id);
+    afterSave(deps, doc);
     json(res, 200, { id: doc.id, version: doc.version });
     return true;
   }

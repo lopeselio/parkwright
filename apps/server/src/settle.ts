@@ -9,6 +9,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { DayStats, ParkState } from '@parkwright/sim';
 import type { Cache } from './cache.ts';
 import type { Store } from './store.ts';
+import type { Verifier } from './verify.ts';
 
 export interface ChainApi {
   admin: string;
@@ -39,7 +40,7 @@ export const dayHash = (d: DayStats) => createHash('sha256').update(JSON.stringi
 export class Settler {
   log: string[] = [];
   private running = false;
-  constructor(private chain: ChainApi, private store: Store, private cache: Cache, private now: () => number = Date.now) {}
+  constructor(private chain: ChainApi, private store: Store, private cache: Cache, private now: () => number = Date.now, private verifier?: Verifier) {}
 
   /** Register a park on chain, owned by the admin. Safe to call again: "already registered" is fine. */
   async register(parkId: string, name: string): Promise<boolean> {
@@ -81,6 +82,11 @@ export class Settler {
   async settlePark(parkId: string, deadline = Infinity): Promise<{ settled: number; complete: boolean }> {
     const doc = await this.store.get(parkId);
     if (!doc) return { settled: 0, complete: true };
+    // Only spend the simulation actually produced: the save must replay exactly from its action log.
+    if (this.verifier) {
+      const v = await this.verifier.verify(doc.id, doc.version, doc.save);
+      if (!v.ok) { this.note(`${parkId} v${doc.version} not settled: ${v.reason}`); return { settled: 0, complete: true }; }
+    }
     // The park must exist on chain and still be in the admin's custody (claimed parks need replay
     // verification before the server will settle client-reported spend into them).
     let owner = await this.chain.parkOwner(parkId).catch(() => undefined);
