@@ -16,6 +16,12 @@ Work in progress. See DESIGN.md.
 - Do: press `?` or the **?** button in the top bar. See: the rules and controls sheet, with buttons to replay the welcome, restart the walkthrough or start a new park. Add `?play` to the URL to skip the title screen.
 - Do: open **Rides → Timber Coaster**, click a tile for the station, then point at a piece button. See: a see-through preview of that piece at the track's open end, with the tiles it takes and an arrow for where the track heads next. It's green if the piece fits; red if it doesn't, with the reason in the panel (e.g. "tile 48,34 is not clear"). Pieces that can't fit are dimmed. With nothing hovered, it previews the last piece you added.
 
+- Do: open the game on a phone or tablet. See:
+  - one finger taps to build or select, and drags to lay paths (with **Inspect** selected, a drag pans);
+  - two fingers pinch to zoom, drag to pan, and a quarter twist turns the view;
+  - **⟲ R ⟳** buttons in the bottom-right corner turn the view and rotate the piece you're placing.
+  - On a desktop, right-drag also pans.
+
 Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 24 40`, then `ride build teacups 21 34 --rot 1`, then `ride open teacups`. Visitors walk in from the gate and queue for the ride.
 
 ## Tests
