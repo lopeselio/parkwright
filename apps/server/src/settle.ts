@@ -99,7 +99,8 @@ export class Settler {
       if (!(await this.register(parkId, doc.name))) return { settled: 0, complete: false };
       owner = this.chain.admin;
     }
-    if (owner !== this.chain.admin) { this.note(`${parkId} is owned by ${owner}; not settling client-reported spend`); return { settled: 0, complete: true }; }
+    // A claimed park settles only on verified spend; without a verifier, only admin-held parks settle.
+    if (owner !== this.chain.admin && !this.verifier) { this.note(`${parkId} is owned by ${owner}; not settling unverified spend`); return { settled: 0, complete: true }; }
 
     const s = (doc.save as { snapshot: ParkState }).snapshot;
     const through = Number((await this.cache.get(doneKey(parkId)).catch(() => null)) ?? -1);
