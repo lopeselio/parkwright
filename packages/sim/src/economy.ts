@@ -128,12 +128,12 @@ export const AWARE_START = 1000;
 export const AWARE_FULL = 6000;
 
 /** Expected arrivals per day. */
-export function arrivalRate(s: ParkState, c: Content): number {
+export function arrivalRate(s: ParkState, c: Content, inPark?: number): number {
   let rate = 10 + s.rating / 6;
   let draw = 0;
   for (const r of s.rides) if (r.status === 'open') draw += c.rideTypes[r.type].draw;
-  let here = 0;
-  for (const v of s.visitors) if (v.mode !== 'gone') here++;
+  let here = inPark ?? 0;
+  if (inPark === undefined) for (const v of s.visitors) if (v.mode !== 'gone') here++;
   if (rulesOf(s) >= 2) {
     // v2: what's on offer drives demand, word of mouth builds with every visitor so far, and a park
     // holds three and a half to five visitors per point of draw before word gets round that it's packed.

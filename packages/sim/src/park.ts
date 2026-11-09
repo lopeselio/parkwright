@@ -54,6 +54,10 @@ export class Park {
   private byId = new Map<number, Visitor>();
   private byIdOf: Visitor[] | null = null;
   private byIdLen = 0;
+  /** Visitors in the park at the end of the last tick (see tick()). */
+  private here = 0;
+  private hereTick = -1;
+  private hereOf: Visitor[] | null = null;
   /** Reused buffer for the per-tick crowd counts (rules v2+). */
   private crowdBuf: Uint16Array | null = null;
 
@@ -165,14 +169,18 @@ export class Park {
   tick() {
     const s = this.s, c = this.c;
     s.tick++;
-    const rate = arrivalRate(s, c);
+    const rate = arrivalRate(s, c, this.hereTick === s.tick - 1 && this.hereOf === s.visitors ? this.here : undefined);
     if (chance(s.rng, Math.round(rate * 100), TICKS_PER_DAY * 100)) spawnVisitor(s, c);
     const crowd = this.crowd();
-    for (const v of s.visitors) updateVisitor(s, c, this.routes, v, crowd);
+    let here = 0;
+    for (const v of s.visitors) { updateVisitor(s, c, this.routes, v, crowd); if (v.mode !== 'gone') here++; }
     const byId = this.visitorIndex();
     for (const r of s.rides) updateRide(s, c, r, byId);
     updateStaff(s, c, this.routes);
     if (s.tick % TICKS_PER_DAY === 0) this.endDay();
+    // Nothing after the visitor loop (rides, staff, end of day) or between ticks (actions) turns anyone
+    // into 'gone' or back, so the count carries to the next tick's arrival roll unchanged.
+    this.here = here; this.hereTick = s.tick; this.hereOf = s.visitors;
   }
 
   /** Rules v2+: walking visitors per tile at the start of this tick (v1 counts on demand instead). */
