@@ -102,7 +102,8 @@ export function arrivalRate(s: ParkState, c: Content): number {
   let rate = 10 + s.rating / 6;
   let draw = 0;
   for (const r of s.rides) if (r.status === 'open') draw += c.rideTypes[r.type].draw;
-  const here = s.visitors.filter((v) => v.mode !== 'gone').length;
+  let here = 0;
+  for (const v of s.visitors) if (v.mode !== 'gone') here++;
   if (here > draw * 3) rate /= 3;
   else if (here > draw * 2) rate /= 1.6;
   const vfm = valueForMoney(s);
