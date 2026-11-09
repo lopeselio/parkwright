@@ -60,7 +60,7 @@ export class Hud {
               void this.cloud.verification().then((v) => { this.verification = v; this.renderSide(); });
             }
           } }, p[0].toUpperCase() + p.slice(1))),
-          h('button', { class: 'term-btn', title: 'Terminal (`)', onclick: () => this.toggleTerminal() }, '>_ Terminal'),
+          h('button', { class: 'term-btn', title: 'Terminal (`)', 'aria-label': 'Terminal', onclick: () => this.toggleTerminal() }, '>_', h('span', { class: 'term-label' }, ' Terminal')),
           h('button', { class: 'help-btn', 'data-tour': 'help', title: 'How to play (?)', 'aria-label': 'How to play', onclick: () => dispatchEvent(new Event('pw:help')) }, '?'),
         ),
         s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
