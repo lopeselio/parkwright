@@ -34,20 +34,72 @@ export class Tools {
     game.onReplace(() => { this.lastPiece = 'straight'; if (this.tool.kind !== 'select') this.set({ kind: 'select' }); else this.previewPiece(null); });
     const ndc = (e: PointerEvent) => new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     let panning: { x: number; y: number } | null = null;
+    const panBy = (dx: number, dy: number) => { const k = (world.zoom * 2) / innerHeight; world.pan(-dx * k, -dy * k * 1.4); };
+
+    // ── Touch ──────────────────────────────────────────────────────────────
+    // One finger: build tools act as with a mouse (drag paths, tap to place); with Inspect (or a tap tool) a
+    // drag pans and a still tap selects. Two fingers: pinch zooms, drag pans, a quarter twist turns the view.
+    const touches = new Map<number, { x: number; y: number }>();
+    let tap: { id: number; x: number; y: number; tile: [number, number] | null; moved: boolean } | null = null;
+    let pinch: { dist: number; zoom: number; mid: { x: number; y: number }; angle: number } | null = null;
+    /** After a two-finger gesture, ignore the fingers until all of them lift (no stray tap or path). */
+    let gestureLock = false;
+    const two = () => { const [a, b] = [...touches.values()]; return { a, b }; };
+    const pinchState = () => {
+      const { a, b } = two();
+      return { dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+    };
+    const TAP_SLOP = 10;
+    const dragTool = () => this.tool.kind === 'path' || this.tool.kind === 'scenery' || this.tool.kind === 'bulldoze';
+
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
       // Capture so a release outside the canvas (over the HUD or outside the window) still ends the drag here.
-      canvas.setPointerCapture(e.pointerId);
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size >= 2) {
+          // A second finger turns whatever the first was doing into a camera gesture.
+          tap = null; panning = null; this.dragFrom = null; gestureLock = true;
+          const p = pinchState();
+          pinch = { ...p, zoom: world.zoom };
+          this.preview();
+          return;
+        }
+        if (gestureLock) return;
+        const t = world.pickTile(ndc(e));
+        this.hover = t;
+        if (dragTool()) { if (t) this.dragFrom = t; this.preview(); return; }
+        tap = { id: e.pointerId, x: e.clientX, y: e.clientY, tile: t, moved: false };
+        this.preview();
+        return;
+      }
       if (e.button === 2 || e.button === 1) { panning = { x: e.clientX, y: e.clientY }; return; }
       const t = world.pickTile(ndc(e));
       if (!t) return;
-      if (this.tool.kind === 'path' || this.tool.kind === 'scenery' || this.tool.kind === 'bulldoze') this.dragFrom = t;
+      if (dragTool()) this.dragFrom = t;
       else this.click(t);
     });
-    const cancel = () => { panning = null; this.dragFrom = null; this.preview(); };
-    canvas.addEventListener('pointercancel', cancel);
-    canvas.addEventListener('lostpointercapture', () => { panning = null; });
+    const cancel = () => { panning = null; this.dragFrom = null; tap = null; this.preview(); };
+    const liftTouch = (id: number) => {
+      touches.delete(id);
+      if (touches.size < 2) pinch = null;
+      if (touches.size === 0) gestureLock = false;
+    };
+    canvas.addEventListener('pointercancel', (e) => { if (e.pointerType === 'touch') liftTouch(e.pointerId); cancel(); });
+    canvas.addEventListener('lostpointercapture', (e) => { if (e.pointerType === 'touch' && touches.has(e.pointerId)) liftTouch(e.pointerId); panning = null; });
     canvas.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') {
+        const wasGesture = gestureLock;
+        liftTouch(e.pointerId);
+        if (wasGesture) { this.dragFrom = null; return; }
+        if (tap && tap.id === e.pointerId) {
+          const t = tap;
+          tap = null;
+          if (!t.moved && t.tile) this.click(t.tile);
+          return;
+        }
+      }
       if (panning) { panning = null; return; }
       if (!this.dragFrom) return;
       const t = world.pickTile(ndc(e)) ?? this.hover ?? this.dragFrom;
@@ -56,10 +108,35 @@ export class Tools {
       this.preview();
     });
     canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') {
+        const prev = touches.get(e.pointerId);
+        if (!prev) return;
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinch && touches.size >= 2) {
+          const p = pinchState();
+          world.setZoom(pinch.zoom * (pinch.dist / p.dist));
+          panBy(p.mid.x - pinch.mid.x, p.mid.y - pinch.mid.y);
+          pinch.mid = p.mid;
+          // Twist: a quarter turn of the view per ~50° of finger rotation.
+          let d = p.angle - pinch.angle;
+          if (d > Math.PI) d -= Math.PI * 2;
+          if (d < -Math.PI) d += Math.PI * 2;
+          if (Math.abs(d) > 0.87) { world.rotate(d > 0 ? -1 : 1); pinch.angle = p.angle; }
+          return;
+        }
+        if (gestureLock) return;
+        if (tap && tap.id === e.pointerId) {
+          if (!tap.moved && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) tap.moved = true;
+          if (tap.moved) panBy(e.clientX - prev.x, e.clientY - prev.y);
+          return;
+        }
+        this.hover = world.pickTile(ndc(e));
+        this.preview();
+        return;
+      }
       if (e.buttons === 0 && (panning || this.dragFrom)) { cancel(); return; }
       if (panning) {
-        const k = (world.zoom * 2) / innerHeight;
-        world.pan(-(e.clientX - panning.x) * k, -(e.clientY - panning.y) * k * 1.4);
+        panBy(e.clientX - panning.x, e.clientY - panning.y);
         panning = { x: e.clientX, y: e.clientY };
         return;
       }
