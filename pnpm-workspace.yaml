@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - e2e
 # Vite 8 bundles with Rolldown; esbuild's install script is not needed.
 allowBuilds:
   esbuild: false

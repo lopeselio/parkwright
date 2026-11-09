@@ -10,3 +10,6 @@ coverage/
 saves/
 assets/blender/*.blend1
 mods/workspace/
+e2e/.saves/
+test-results/
+playwright-report/
