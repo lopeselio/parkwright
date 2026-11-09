@@ -114,6 +114,13 @@ export class Cloud {
     return res?.ok ? res.json() : null;
   }
 
+  /** Has the server replayed this park's actions and got exactly this save? (Only verified parks settle and rank.) */
+  async verification(): Promise<{ verified: boolean; reason: string } | null> {
+    if (!this.link) return null;
+    const res = await fetch(`/api/parks/${this.link.id}/verify`).catch(() => null);
+    return res?.ok ? res.json() : null;
+  }
+
   async leaderboard(): Promise<{ id: string; name: string; rating: number; value: number; visitors: number; day: number }[]> {
     const res = await fetch('/api/leaderboard');
     if (!res.ok) return [];
