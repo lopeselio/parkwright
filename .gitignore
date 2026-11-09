@@ -12,3 +12,6 @@ assets/blender/*.blend1
 mods/workspace/
 __pycache__/
 *.pyc
+e2e/.saves/
+test-results/
+playwright-report/

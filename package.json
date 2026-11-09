@@ -9,7 +9,8 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check:gas": "node --experimental-transform-types --disable-warning=ExperimentalWarning packages/chain/src/check-gas.ts"
+    "check:gas": "node --experimental-transform-types --disable-warning=ExperimentalWarning packages/chain/src/check-gas.ts",
+    "e2e": "pnpm --filter @parkwright/web build && pnpm --filter @parkwright/e2e e2e"
   },
   "devDependencies": {
     "typescript": "5.9.3",
