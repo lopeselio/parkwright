@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "build": "tsc --noEmit -p ."
+    "build": "tsc --noEmit -p .",
+    "balance": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/balance.ts"
   },
   "dependencies": { "@parkwright/content": "workspace:*" }
 }
