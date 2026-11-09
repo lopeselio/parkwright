@@ -57,10 +57,13 @@ export class Tools {
       // Capture so a release outside the canvas (over the HUD or outside the window) still ends the drag here.
       try { canvas.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
       if (e.pointerType === 'touch') {
+        // A primary touch means no other finger is down: forget any touch whose pointerup never came
+        // (e.g. the app was backgrounded mid-gesture), so it can't lock out one-finger input.
+        if (e.isPrimary) { touches.clear(); pinch = null; gestureLock = false; tap = null; }
         touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (touches.size >= 2) {
           // A second finger turns whatever the first was doing into a camera gesture.
-          tap = null; panning = null; this.dragFrom = null; gestureLock = true;
+          tap = null; panning = null; this.dragFrom = null; gestureLock = true; this.hover = null;
           const p = pinchState();
           pinch = { ...p, zoom: world.zoom };
           this.preview();
@@ -84,21 +87,33 @@ export class Tools {
     const liftTouch = (id: number) => {
       touches.delete(id);
       if (touches.size < 2) pinch = null;
+      // One of three fingers lifted: measure from the two that are left, so the camera doesn't jump.
+      else if (pinch) pinch = { ...pinchState(), zoom: world.zoom };
       if (touches.size === 0) gestureLock = false;
     };
-    canvas.addEventListener('pointercancel', (e) => { if (e.pointerType === 'touch') liftTouch(e.pointerId); cancel(); });
+    canvas.addEventListener('pointercancel', (e) => { if (e.pointerType === 'touch') { liftTouch(e.pointerId); this.hover = null; } cancel(); });
     canvas.addEventListener('lostpointercapture', (e) => { if (e.pointerType === 'touch' && touches.has(e.pointerId)) liftTouch(e.pointerId); panning = null; });
     canvas.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'touch') {
         const wasGesture = gestureLock;
         liftTouch(e.pointerId);
-        if (wasGesture) { this.dragFrom = null; return; }
+        // A finger has no hover: once it lifts, the ghost goes.
+        const clearHover = () => { this.hover = null; this.preview(); };
+        if (wasGesture) { this.dragFrom = null; clearHover(); return; }
         if (tap && tap.id === e.pointerId) {
           const t = tap;
           tap = null;
           if (!t.moved && t.tile) this.click(t.tile);
+          clearHover();
           return;
         }
+        if (this.dragFrom) {
+          const t = world.pickTile(ndc(e)) ?? this.hover ?? this.dragFrom;
+          this.drag(this.dragFrom, t);
+          this.dragFrom = null;
+        }
+        clearHover();
+        return;
       }
       if (panning) { panning = null; return; }
       if (!this.dragFrom) return;
@@ -126,7 +141,7 @@ export class Tools {
         }
         if (gestureLock) return;
         if (tap && tap.id === e.pointerId) {
-          if (!tap.moved && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) tap.moved = true;
+          if (!tap.moved && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) { tap.moved = true; this.hover = null; this.preview(); }
           if (tap.moved) panBy(e.clientX - prev.x, e.clientY - prev.y);
           return;
         }
