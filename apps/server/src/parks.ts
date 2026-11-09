@@ -30,7 +30,7 @@ export interface Deps {
   verifier?: Verifier;
 }
 
-/** After a save lands: verify it by replay, then (only if it matches) rank it and queue it for settlement. */
+/** After a save lands: verify it by replay, then (only if it matches) rank it — by the REPLAYED numbers — and queue it for settlement. */
 function afterSave(deps: Deps, doc: ParkDoc) {
   const { verifier, cache, settler } = deps;
   if (!verifier) {
@@ -40,9 +40,10 @@ function afterSave(deps: Deps, doc: ParkDoc) {
     return;
   }
   void verifier.verify(doc.id, doc.version, doc.save).then(async (r) => {
-    if (!r.ok) { await cache.zrem(boardOf(doc), doc.id).catch(() => {}); return; }
+    if (!r.ok || !r.replayed) return; // the last verified version (if any) keeps its place
+    const ranked = { ...doc, rating: r.replayed.rating, value: r.replayed.value };
     await cache.zrem(boardOf({ modded: !doc.modded }), doc.id).catch(() => {});
-    await cache.zadd(boardOf(doc), boardScore(doc), doc.id).catch(() => {});
+    await cache.zadd(boardOf(doc), boardScore(ranked), doc.id).catch(() => {});
     await settler?.markDirty(doc.id);
   }).catch((e) => console.error('[verify]', (e as Error).message));
 }
@@ -136,9 +137,14 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       const r = await docs.read(`park:${member}`, async () => { const d = await store.get(member); return d ? JSON.stringify(publicDoc(d)) : null; });
       if (!r.value) return null;
       const d = JSON.parse(r.value);
-      // Only parks whose current version replays exactly are ranked.
-      if (deps.verifier && !(await deps.verifier.status(d.id, d.version))?.ok) return null;
-      return { id: d.id, name: d.name, rating: d.rating, value: d.value, visitors: d.visitors, day: d.day, verified: true };
+      // Only verified parks are ranked, and with the numbers the server's replay produced.
+      if (deps.verifier) {
+        const last = await deps.verifier.latest(d.id);
+        const rp = last?.result.replayed;
+        if (!rp) return null;
+        return { id: d.id, name: d.name, rating: rp.rating, value: rp.value, visitors: rp.visitors, day: rp.day, verified: true, version: last!.version };
+      }
+      return { id: d.id, name: d.name, rating: d.rating, value: d.value, visitors: d.visitors, day: d.day };
     }));
     json(res, 200, { parks: rows.filter(Boolean), cache: cache.kind });
     return true;
