@@ -13,6 +13,23 @@ export class Hud {
   private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
   private chain: Awaited<ReturnType<Cloud['chain']>> = null;
   private verification: Awaited<ReturnType<Cloud['verification']>> = null;
+  private claiming = false;
+
+  /** Claim the park or withdraw its earnings through the player's NEAR wallet. */
+  private async walletStep(kind: 'claim' | 'withdraw') {
+    this.claiming = true;
+    this.renderSide();
+    try {
+      if (kind === 'claim') toast(`Claimed — the park now belongs to ${await this.cloud.claim()}`);
+      else { await this.cloud.withdraw(); toast('Withdrawn — the earnings are in your CR balance on NEAR'); }
+    } catch (e) {
+      toast((e as Error).message || 'the wallet step did not finish', 'err');
+    } finally {
+      this.claiming = false;
+      this.chain = await this.cloud.chain();
+      this.renderSide();
+    }
+  }
   private last = '';
 
   constructor(private game: Game, private tools: Tools, private toggleTerminal: () => void, private cloud: Cloud) {
@@ -198,7 +215,7 @@ export class Hud {
     const side = $('#side');
     const s = this.game.s, c = this.game.content;
     const r0 = this.selected !== null ? s.rides.find((x) => x.id === this.selected) : null;
-    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|${this.chain?.park?.earned ?? ''}|${this.verification?.verified ?? ''}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
+    const key = `${this.selected}|${this.panel}|${this.cloud.status}|${this.board.length}|${this.game.visiting}|${this.chain?.park?.earned ?? ''}|${this.chain?.park?.owner ?? ''}|${this.claiming}|${this.verification?.verified ?? ''}|` + (r0 ? `${r0.status}|${r0.price}|${r0.customers}|${r0.queue.length}|${Math.round(r0.reliability / 100)}` : `${s.day}|${s.cash}|${s.loan}|${s.fee}|${s.staff.length}|${s.campaigns.length}|${s.visitors.length >> 3}`);
     if (!force && (key === this.sideKey || this.pressing)) return;
     this.sideKey = key;
     if (this.selected !== null) {
@@ -297,7 +314,15 @@ export class Hud {
             h('dt', {}, 'Settled into the park'), h('dd', {}, cr(Number(this.chain.park.earned))),
             h('dt', {}, 'Waiting to withdraw'), h('dd', {}, cr(Number(this.chain.park.balance))),
             h('dt', {}, 'Settlements'), h('dd', {}, String(this.chain.park.settlements)),
+            h('dt', {}, 'Owner'), h('dd', {}, this.chain.claimed ? this.chain.park.owner : 'unclaimed (held by the game)'),
           ),
+          this.chain.claimed
+            ? h('button', { disabled: this.claiming || BigInt(this.chain.park.balance || '0') === 0n, onclick: () => this.walletStep('withdraw') }, this.claiming ? 'Waiting for your wallet…' : 'Withdraw earnings')
+            : this.chain.claimable && !this.game.visiting
+              ? h('div', {},
+                  h('button', { class: 'primary', disabled: this.claiming || !this.verification?.verified, onclick: () => this.walletStep('claim') }, this.claiming ? 'Waiting for your wallet…' : 'Claim on NEAR'),
+                  h('p', { class: 'tip' }, this.verification?.verified ? 'Sign in with a NEAR testnet wallet to make this park yours: its earnings become yours to withdraw. A claim is final.' : 'Only verified parks can be claimed.'))
+              : '',
           h('a', { class: 'small', href: `https://testnet.nearblocks.io/address/${this.chain.contract}`, target: '_blank', rel: 'noopener' }, 'See the contract on NearBlocks ↗'),
         ) : link && this.chain?.enabled ? h('p', { class: 'muted' }, 'Registering your park on NEAR… finished days settle within a minute of each cloud save.') : '',
         h('h4', {}, 'Top parks'),
