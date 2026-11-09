@@ -28,7 +28,8 @@ Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEA
 
 - Do: open the game, build a ride, press **Parks → Publish & share**, and let two in-game days pass. See: the Parks panel shows "On NEAR testnet" with the credits settled into your park, and a link to the contract on NearBlocks.
 - Do: `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard.
-- Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract.
+- Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract, plus `claimed`.
+- Do: publish a park, keep playing until the Parks panel shows **✓ Verified**, then press **Claim on NEAR** and pick a testnet wallet in the NEAR Connect picker (e.g. Meteor or HOT). See: the wallet asks you to sign "Claim Parkwright park <id>" (a message, not a transaction, so no gas), then the panel shows you as **Owner**, and `/chain` reports `"claimed": true`. Once it has earned something, **Withdraw earnings** asks your wallet to sign a `withdraw` call (1 yoctoNEAR), and the escrow moves to your CR balance (`ft_balance_of`).
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
 - Setup (once, by the owner): `cargo near deploy …` (see DESIGN §9), then `pnpm --filter @parkwright/chain setup:patrons`.
 
