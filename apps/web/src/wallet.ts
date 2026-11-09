@@ -6,7 +6,7 @@ export const CONTRACT = 'park.parkwright.testnet';
 let connector: Promise<NearConnector> | null = null;
 
 function picker() {
-  connector ??= import('@hot-labs/near-connect').then(({ NearConnector }) => new NearConnector({ network: 'testnet', features: { signMessage: true, signAndSendTransaction: true } }));
+  connector ??= import('@hot-labs/near-connect').then(({ NearConnector }) => new NearConnector({ network: 'testnet', features: { signMessage: true, signAndSendTransaction: true, testnet: true } }));
   return connector;
 }
 

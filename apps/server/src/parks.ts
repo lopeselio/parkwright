@@ -179,7 +179,7 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     if (!validId(id)) { json(res, 400, { error: 'bad park id' }); return true; }
     if (!deps.chainPark) { json(res, 200, { enabled: false }); return true; }
     // On-chain state changes with each settlement: cache it briefly (20 s) to spare the RPC.
-    let body = await cache.get(`chain:${id}`).catch(() => null);
+    let body = new URL(req.url ?? '/', 'http://x').searchParams.has('fresh') ? null : await cache.get(`chain:${id}`).catch(() => null);
     const from = body ? 'l2' : 'rpc';
     if (!body) {
       const park = (await deps.chainPark!(id).catch(() => null)) as { owner?: string } | null;

@@ -117,9 +117,9 @@ export class Cloud {
   }
 
   /** Your park's state on NEAR (escrow, earnings, settlements), if settlement is on. */
-  async chain(): Promise<{ enabled: boolean; contract?: string; claimed?: boolean; claimable?: boolean; park?: { owner: string; balance: string; earned: string; settlements: number } | null } | null> {
+  async chain(fresh = false): Promise<{ enabled: boolean; contract?: string; claimed?: boolean; claimable?: boolean; park?: { owner: string; balance: string; earned: string; settlements: number } | null } | null> {
     if (!this.link) return null;
-    const res = await fetch(`/api/parks/${this.link.id}/chain`).catch(() => null);
+    const res = await fetch(`/api/parks/${this.link.id}/chain${fresh ? '?fresh=1' : ''}`).catch(() => null);
     return res?.ok ? res.json() : null;
   }
 

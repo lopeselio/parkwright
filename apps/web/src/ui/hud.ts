@@ -26,7 +26,7 @@ export class Hud {
       toast((e as Error).message || 'the wallet step did not finish', 'err');
     } finally {
       this.claiming = false;
-      this.chain = await this.cloud.chain();
+      this.chain = await this.cloud.chain(true);
       this.renderSide();
     }
   }
