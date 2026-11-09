@@ -8,6 +8,7 @@ import { NearAiClient } from '@parkwright/ai';
 import { attachBridge } from './bridge.ts';
 import { attachClaudeTerminal } from './claude.ts';
 import { LocalRelay, RedisRelay, type Relay } from './relay.ts';
+import { GasWatch } from './gas.ts';
 
 const PORT = Number(process.env.PORT ?? 8790);
 const WEB_DIST = resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname);
@@ -61,7 +62,9 @@ if (settler) {
 const ai = process.env.NEARAI_API_KEY ? new NearAiClient(process.env.NEARAI_API_KEY, process.env.NEARAI_MODEL ?? 'Qwen/Qwen3.6-35B-A3B-FP8') : undefined;
 // Bridge relay: Redis pub/sub across replicas when hosted, in-process locally.
 const relay: Relay = process.env.REDIS_URL ? await RedisRelay.connect(process.env.REDIS_URL).catch((e) => { console.error('[relay] falling back to local:', e.message); return new LocalRelay(); }) : new LocalRelay();
-const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay, verifier }, { webDist: WEB_DIST, version: VERSION });
+// With settlement on, /api/health also lists signers low on NEAR for gas (read at most every 10 min).
+const gas = settler ? new GasWatch(async () => (await import('@parkwright/chain/gas')).gasReport()) : undefined;
+const server = createApp({ store, cache, docs: new Layered(cache), settler, chainPark, ai, relay, verifier, gas }, { webDist: WEB_DIST, version: VERSION });
 attachBridge(server, relay, cache);
 // Local-only Claude terminal for modding (PW_CLAUDE_TERMINAL=1; never on the hosted image).
 attachClaudeTerminal(server, relay, PORT, resolve(new URL('../../..', import.meta.url).pathname));
