@@ -183,6 +183,3 @@ button.link { border: none; background: none; color: var(--muted); text-decorati
 /* Phones: the toolbar is a bottom bar, and the drawer and side panel sit above it, so the camera buttons
    go in a column on the right edge, clear of all three. */
 @media (max-width: 760px) { #cam { top: 50%; bottom: auto; transform: translateY(-50%); flex-direction: column; right: 8px; } }
-/* Sound toggle (M). */
-#mute { position: fixed; right: 14px; top: 58px; z-index: 4; width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgb(61 90 106 / 0.2); background: rgb(251 246 234 / 0.9); font-size: 16px; line-height: 1; cursor: pointer; box-shadow: 0 2px 6px rgb(0 0 0 / 0.08); }
-#mute:hover { background: #fff; }

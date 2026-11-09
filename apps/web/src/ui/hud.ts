@@ -34,7 +34,8 @@ export class Hud {
   private renderTop() {
     const s = this.game.s;
     // Rebuild the bar only when its structure changes (speed, open panel, goal state); otherwise patch numbers.
-    const key = [s.name, this.game.speed, this.panel, s.objective.status].join('|');
+    const muted = document.documentElement.dataset.muted === '1';
+    const key = [s.name, this.game.speed, this.panel, s.objective.status, muted].join('|');
     if (key !== this.last || !this.topRefs) {
       this.last = key;
       const speeds = [0, 1, 2, 4].map((n) => h('button', { class: `speed ${this.game.speed === n ? 'on' : ''}`, title: n ? `${n}× speed` : 'pause', onclick: () => { this.game.speed = n; this.renderTop(); } }, n ? `${n}×` : '❚❚'));
@@ -47,7 +48,9 @@ export class Hud {
         h('div', { class: 'stat' }, h('label', {}, 'Rating'), h('div', { class: 'bar' }, refs.bar), refs.rating),
         h('div', { class: 'stat' }, h('label', {}, 'Visitors'), refs.visitors)),
         refs.save,
-        h('div', { class: 'speeds' }, ...speeds),
+        h('div', { class: 'speeds' }, ...speeds,
+          // Sound (main.ts owns the audio; the bar only reflects and toggles it).
+          h('button', { class: 'speed sound', 'aria-pressed': String(!muted), 'aria-label': 'Sound', title: muted ? 'Sound off (M)' : 'Sound on (M)', onclick: () => dispatchEvent(new Event('pw:sound-toggle')) }, muted ? '🔇' : '🔊')),
         h('div', { class: 'menu' },
           ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', 'data-tour': p, onclick: () => {
             this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
