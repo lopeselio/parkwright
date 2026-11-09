@@ -170,6 +170,21 @@ impl Contract {
         emit("park_registered", json!({ "park_id": park_id, "owner": owner, "name": name }));
     }
 
+    /// A player claims a park: the admin (the game server, after checking the player signed in with this
+    /// account and holds the park's key) hands over a park it still holds. Once claimed, only the owner
+    /// can move it again (transfer_park), so the admin can never take a claimed park back.
+    pub fn assign_park(&mut self, park_id: String, owner: AccountId) {
+        self.assert_admin();
+        let mut park = self.parks.get(&park_id).cloned().unwrap_or_else(|| env::panic_str("no such park"));
+        require!(park.owner == self.admin, "that park has already been claimed");
+        require!(owner != self.admin, "assign it to a player, not the admin");
+        park.owner = owner.clone();
+        self.parks.insert(park_id.clone(), park);
+        self.add_owner(&self.admin.clone(), -1);
+        self.add_owner(&owner, 1);
+        emit("park_claimed", json!({ "park_id": park_id, "owner": owner }));
+    }
+
     /// Hand a park (and its unwithdrawn escrow) to another account.
     #[payable]
     pub fn transfer_park(&mut self, park_id: String, new_owner: AccountId) {

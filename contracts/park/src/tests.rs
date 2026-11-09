@@ -43,7 +43,7 @@ fn line(venue: &str, amount: u128) -> SettleLine {
 fn conserved(c: &Contract) {
     let escrow: u128 = c.parks.values().map(|p| p.balance.0).sum();
     assert_eq!(escrow, c.escrow_total, "escrow_total tracks park balances");
-    let held = ["p0.park.testnet", "p1.park.testnet", "alice.testnet", "bob.testnet"].iter().map(|a| c.balance(&acc(a))).sum::<u128>();
+    let held = ["p0.park.testnet", "p1.park.testnet", "alice.testnet", "bob.testnet", "carol.testnet"].iter().map(|a| c.balance(&acc(a))).sum::<u128>();
     assert_eq!(escrow + held, c.total_supply, "credits must be conserved");
 }
 
@@ -307,4 +307,39 @@ fn metadata_and_supply() {
     assert_eq!(c.ft_total_supply().0, 200_000);
     assert_eq!(c.ft_metadata()["symbol"], "CR");
     assert_eq!(c.audit()["total_supply"], "200000");
+}
+
+#[test]
+fn the_admin_assigns_an_unclaimed_park_and_the_player_withdraws() {
+    let mut c = setup();
+    ctx("admin.testnet", 0);
+    c.register_park("claimme01".into(), "Claim Me".into(), None);
+    ctx("p0.park.testnet", 0);
+    c.settle_day("claimme01".into(), 1, vec![line("r1", 500)], "".into());
+    ctx("admin.testnet", 0);
+    c.assign_park("claimme01".into(), acc("carol.testnet"));
+    assert_eq!(c.get_park("claimme01".into()).unwrap().owner, acc("carol.testnet"));
+    ctx("carol.testnet", 1);
+    assert_eq!(c.withdraw("claimme01".into(), None).0, 500);
+    conserved(&c);
+}
+
+#[test]
+#[should_panic(expected = "already been claimed")]
+fn a_claimed_park_cannot_be_reassigned_by_the_admin() {
+    let mut c = setup();
+    ctx("admin.testnet", 0);
+    c.register_park("claimme02".into(), "Claim Me".into(), None);
+    c.assign_park("claimme02".into(), acc("carol.testnet"));
+    c.assign_park("claimme02".into(), acc("mallory.testnet"));
+}
+
+#[test]
+#[should_panic(expected = "only the admin")]
+fn only_the_admin_assigns_parks() {
+    let mut c = setup();
+    ctx("admin.testnet", 0);
+    c.register_park("claimme03".into(), "Claim Me".into(), None);
+    ctx("mallory.testnet", 0);
+    c.assign_park("claimme03".into(), acc("mallory.testnet"));
 }
