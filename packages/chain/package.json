@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "build": "tsc --noEmit -p .",
+    "check:gas": "node --experimental-transform-types --disable-warning=ExperimentalWarning src/check-gas.ts",
     "setup:patrons": "node --experimental-transform-types --disable-warning=ExperimentalWarning src/setup-patrons.ts"
   },
   "dependencies": { "near-kit": "0.20.2" },
