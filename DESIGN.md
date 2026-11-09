@@ -208,7 +208,10 @@ Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with
 - **Worker:** `apps/server/src/settle.ts`. After each cloud save, the park is marked dirty. One replica at a time (holding a Redis lock) settles its finished days: one `settle_day` per visitor group per day.
   - If a day's total is over the cap, the agent pays at most the cap, scaled evenly across venues.
   - "Already settled" counts as success.
-- **Trust note:** the day's spend comes from the client's save, which the sim produced in the browser. The caps bound what any park-day can draw. The worker applies the contract's bounds before sending, so bad saves cost no gas. It only settles into parks still held by the admin; a claimed park needs replay verification first (future work).
+- **Verified settlement:** a published save carries its complete action log (`fullLog`). Before any settlement, and before ranking, the server replays it in a worker thread from seed, scenario, mods and actions, and requires the exact same state hash (`apps/server/src/verify.ts`). This is cached per park version.
+  - Inflated spend, dropped or reordered actions, and trimmed logs all fail.
+  - Parks that load cost-changing mod rules partway through also fail, conservatively.
+  - The caps stay as a second line of defence.
 - **Keys:** settle_day burns ~3 Tgas (measured). The first patrons' keys have a lifetime allowance of 0.12 NEAR, roughly 400 settlements each. New patrons get keys with no allowance, limited by the account's own 0.3 NEAR. A function-call-only account can't be rekeyed, so the fix is new patron accounts plus `set_patron(old, active=false)`.
 - **Later:** contractor agents that bid to build coasters, paid from escrow; players claiming parks with NEAR Auth.
 
