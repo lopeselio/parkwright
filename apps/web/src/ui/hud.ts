@@ -8,6 +8,8 @@ const ICON: Record<string, string> = { select: '☝', path: '▦', queue: '⋯',
 
 export class Hud {
   private selected: number | null = null;
+  /** The ride the inspect panel shows (the world outlines it). */
+  get selection() { return this.selected; }
   private drawer: 'rides' | 'stalls' | 'scenery' | null = null;
   private panel: 'finance' | 'visitors' | 'staff' | 'parks' | null = null;
   private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
