@@ -77,13 +77,13 @@ function glowTexture() {
 
 /** Light through the day, as [phase, sun colour, sun strength, sky, ground bounce, bounce strength, backdrop, night]. */
 const DAY: [number, string, number, string, string, number, string, number][] = [
-  [0.0, '#ffc79a', 1.5, '#c4cff0', '#6f7f5a', 0.7, '#c9d6ea', 0.55],
+  [0.0, '#ffc49a', 1.2, '#9fb0e0', '#5d6b52', 0.6, '#b8c3e2', 0.6],
   [0.07, '#ffe2bf', 2.1, '#dbe9fb', '#7d8f58', 0.8, '#c2e1ef', 0.0],
   [0.16, '#fff1d6', 2.4, '#e6f2ff', '#7d8f58', 0.8, '#bfe3f0', 0.0],
   [0.7, '#fff1d6', 2.4, '#e6f2ff', '#7d8f58', 0.8, '#bfe3f0', 0.0],
   [0.82, '#ffd59a', 2.1, '#f3e2cf', '#8a8350', 0.8, '#f0d9bd', 0.15],
-  [0.92, '#ff9f7a', 1.3, '#9aa6d6', '#5e6a52', 0.75, '#a8a6cf', 0.7],
-  [1.0, '#ffc79a', 1.5, '#c4cff0', '#6f7f5a', 0.7, '#c9d6ea', 0.55],
+  [0.93, '#ff9472', 0.85, '#7f8fd0', '#4f5a4a', 0.55, '#9c9cc8', 0.9],
+  [1.0, '#ffc49a', 1.2, '#9fb0e0', '#5d6b52', 0.6, '#b8c3e2', 0.6],
 ];
 
 const MAX_PEOPLE = 4000;
@@ -197,6 +197,8 @@ export class World {
   private hemi: THREE.HemisphereLight;
   /** 0 by day, up to 1 at dusk: lamps glow and pool light on the paths. */
   night = 0;
+  /** Pin the light to a time of day (0–1, e.g. 0.93 for dusk) instead of the park's clock; for screenshots and checks. */
+  timeOfDay: number | null = null;
   /** Which ride to outline (the inspect panel's), read every frame. */
   selected: () => number | null = () => null;
   private selection = new THREE.Group();
@@ -678,24 +680,25 @@ export class World {
         const tiles: [number, number][] = r.track ? r.track.map((tp) => [tp.x, tp.y]) : [[r.x, r.y]];
         const w = r.track ? 1 : r.w, h = r.track ? 1 : r.h;
         const m = this.selectMat;
-        for (const [x, y] of tiles) {
-          const t = 0.06;
-          for (const [cx, cz, sx, sz] of [[x + w / 2, y + t / 2, w, t], [x + w / 2, y + h - t / 2, w, t], [x + t / 2, y + h / 2, t, h], [x + w - t / 2, y + h / 2, t, h]]) {
-            const b = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.04, sz), m);
-            b.position.set(cx, 0.09, cz);
+        for (const [x0, y0] of tiles) {
+          // Just outside the footprint, so a ride's own plinth can't hide it.
+          const t = 0.09, x = x0 - t / 2, y = y0 - t / 2, ww = w + t, hh = h + t;
+          for (const [cx, cz, sx, sz] of [[x + ww / 2, y, ww + t, t], [x + ww / 2, y + hh, ww + t, t], [x, y + hh / 2, t, hh], [x + ww, y + hh / 2, t, hh]]) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.05, sz), m);
+            b.position.set(cx, 0.1, cz);
             this.selection.add(b);
           }
         }
       }
     }
     this.selection.visible = !!r;
-    if (r) this.selectMat.opacity = 0.65 + Math.sin(time * 4) * 0.25;
+    if (r) this.selectMat.opacity = 0.8 + Math.sin(time * 4) * 0.2;
   }
-  private selectMat = new THREE.MeshBasicMaterial({ color: '#ffd25a', transparent: true, opacity: 0.8, depthWrite: false });
+  private selectMat = new THREE.MeshBasicMaterial({ color: '#ffc531', transparent: true, opacity: 0.9, depthWrite: false });
 
   /** Sun, sky and lamps follow the park's clock: morning, a long day, a golden evening, a blue dusk. */
   private daylight(st: ParkState, alpha: number) {
-    const ph = (((st.tick + alpha) % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY / TICKS_PER_DAY;
+    const ph = this.timeOfDay ?? (((st.tick + alpha) % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY / TICKS_PER_DAY;
     let i = 0;
     while (i < DAY.length - 2 && ph > DAY[i + 1][0]) i++;
     const a = DAY[i], b = DAY[i + 1];
@@ -710,6 +713,7 @@ export class World {
     (this.scene.background as THREE.Color).set(a[6]).lerp(c.set(b[6]), k);
     (this.scene.fog as THREE.Fog).color.copy(this.scene.background as THREE.Color);
     this.night = a[7] + (b[7] - a[7]) * k;
+    this.scene.environmentIntensity = 0.4 * (1 - this.night * 0.55);
     for (const [m, base] of glows) m.emissiveIntensity = base * (1 + this.night * 1.6);
     (this.pools.material as THREE.MeshBasicMaterial).opacity = this.night * 0.55;
     this.pools.visible = this.night > 0.02;
