@@ -6,6 +6,16 @@ let manifest: Promise<Set<string>> | null = null;
 const cache = new Map<string, Promise<THREE.Group | null>>();
 const loader = new GLTFLoader();
 
+/** Every emissive bulb material from the Blender models (named pw_*_glow), with its authored strength, so the
+ * world can turn the lights up at dusk. Materials are shared by every clone, so this catches them all. */
+export const glows = new Map<THREE.MeshStandardMaterial, number>();
+function collectGlows(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (m && !Array.isArray(m) && m.name?.includes('_glow') && !glows.has(m)) glows.set(m, m.emissiveIntensity);
+  });
+}
+
 function available(): Promise<Set<string>> {
   manifest ??= fetch('/models/manifest.json')
     .then((r) => (r.ok ? r.json() : { models: [] }))
@@ -22,6 +32,7 @@ export async function loadModel(id: string): Promise<THREE.Group | null> {
     p = loader.loadAsync(`/models/${id}.glb`).then((g) => {
       g.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       g.scene.userData.clips = g.animations;
+      collectGlows(g.scene);
       return g.scene;
     }).catch(() => null);
     cache.set(id, p);
@@ -69,6 +80,7 @@ export function loadProps(): Promise<Map<string, THREE.Object3D>> {
     if (!have.has('scenery')) return out;
     const g = await loader.loadAsync('/models/scenery.glb');
     g.scene.updateMatrixWorld(true);
+    collectGlows(g.scene);
     for (const o of g.scene.children) if (o.name.startsWith('prop_')) out.set(o.name.slice(5), o);
     return out;
   }).catch(() => new Map());
