@@ -14,6 +14,7 @@ Work in progress. See DESIGN.md.
 - Do: open the game. See: a title screen with **Continue**, **New park** (pick Meadow or Sandbox and name your park) and **How to play**.
 - Do: start a park. See: a four-card welcome (Next/Back/Skip, arrow keys, Esc). Then **Show me how** starts a hands-on walkthrough that highlights each control and waits for you: pick Path, drag a path from the gate, open Rides, place a ride, place a stall, inspect it, speed up time. **End tour** stops it at any point.
 - Do: press `?` or the **?** button in the top bar. See: the rules and controls sheet, with buttons to replay the welcome, restart the walkthrough or start a new park. Add `?play` to the URL to skip the title screen.
+- Do: look at the top bar and toolbar. See: one set of line icons (no emoji): the park name, Cash, Rating and Visitors pills, pause and speed buttons with the speaker, then Finance, Visitors, Staff, Parks, the terminal and help. Panels slide in; on a phone the top bar is three rows (name and speeds, stats, menu) and the toolbar is a bottom bar.
 - Do: let a park day run (90 s at 1×). See: the light follow the park's clock: a warm morning, a long day, a golden evening and a short blue dusk where the bulbs on rides, lamps and the gate glow and lamps pool light on the paths. Purely visual; the sim doesn't know the time of day. In the console, `parkwright.world.timeOfDay = 0.93` pins the dusk look (`null` lets it run again).
 - Do: click a ride with **Inspect**. See: its panel, and a pulsing gold outline round it in the park.
 - Do: open **Rides → Timber Coaster**, click a tile for the station, then point at a piece button. See: a see-through preview of that piece at the track's open end, with the tiles it takes and an arrow for where the track heads next. It's green if the piece fits; red if it doesn't, with the reason in the panel (e.g. "tile 48,34 is not clear"). Pieces that can't fit are dimmed. With nothing hovered, it previews the last piece you added.
@@ -24,7 +25,7 @@ Work in progress. See DESIGN.md.
   - **⟲ R ⟳** buttons in the bottom-right corner turn the view and rotate the piece you're placing.
   - On a desktop, right-drag also pans.
 
-- Do: click anywhere, build a path and a ride, and let time run. See (hear): a thunk for building, a tick for each path tile, a chime as visitors arrive, coins as they spend, a little tune when a ride starts, the chain clack and rush of a coaster run, and a crowd murmur that grows with the park. It's all synthesized in the browser (no audio files). **M**, or the 🔊 button under the top bar, mutes it and the setting is remembered.
+- Do: click anywhere, build a path and a ride, and let time run. See (hear): a thunk for building, a tick for each path tile, a chime as visitors arrive, coins as they spend, a little tune when a ride starts, the chain clack and rush of a coaster run, and a crowd murmur that grows with the park. It's all synthesized in the browser (no audio files). **M**, or the speaker button at the end of the speed controls in the top bar, mutes it and the setting is remembered.
 
 Press `` ` `` to open the park terminal and type `help`. Try `path place 24 33 24 40`, then `ride build teacups 21 34 --rot 1`, then `ride open teacups`. Visitors walk in from the gate and queue for the ride.
 
