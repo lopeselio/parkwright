@@ -216,7 +216,7 @@ export class World {
       this.scene.remove(o);
       const m = o as THREE.Mesh;
       m.geometry?.dispose();
-      if (m === this.ground) (m.material as THREE.Material).dispose();
+      if (m === this.ground || m === this.pools) (m.material as THREE.Material).dispose(); // the glow texture is shared and kept
       if ((m as THREE.InstancedMesh).isInstancedMesh) (m as THREE.InstancedMesh).dispose();
     }
     const g = new THREE.PlaneGeometry(st.w, st.h, st.w, st.h);
