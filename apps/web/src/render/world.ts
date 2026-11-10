@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { DX, DY, SUB, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
+import { DX, DY, SUB, TICKS_PER_DAY, Tile, queueChain, type ParkState, type Ride } from '@parkwright/sim';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
-import { loadModel, loadProps } from './assets.ts';
+import { glows, loadModel, loadProps } from './assets.ts';
 import { buildCoaster, CAR_COLOURS } from './coaster.ts';
 import { Crowd } from './people.ts';
 import { PropSet } from './props.ts';
@@ -47,6 +48,44 @@ const VARIANTS: Record<number, string[]> = {
   4: ['hedge', 'hedge', 'hedge_b'],
   5: ['pine_a', 'pine_b', 'pine_c', 'pine_a'],
 };
+/** A queue-line rail along one tile edge: two posts and a bar, centred on the edge, 1 unit long along x. */
+function railGeometry() {
+  const parts: THREE.BufferGeometry[] = [];
+  for (const x of [-0.45, 0.45]) parts.push(new THREE.CylinderGeometry(0.02, 0.022, 0.26, 6).translate(x, 0.13, 0));
+  parts.push(new THREE.CylinderGeometry(0.013, 0.013, 0.94, 5).rotateZ(Math.PI / 2).translate(0, 0.24, 0));
+  parts.push(new THREE.CylinderGeometry(0.01, 0.01, 0.94, 5).rotateZ(Math.PI / 2).translate(0, 0.13, 0));
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()))!;
+}
+
+let glowTex: THREE.Texture | null = null;
+/** A soft round spot, white in the middle: lamp light on the ground. */
+function glowTexture() {
+  if (glowTex) return glowTex;
+  const s = 64, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  const ctx = cv.getContext('2d')!;
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  glowTex = new THREE.CanvasTexture(cv);
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  return glowTex;
+}
+
+/** Light through the day, as [phase, sun colour, sun strength, sky, ground bounce, bounce strength, backdrop, night]. */
+const DAY: [number, string, number, string, string, number, string, number][] = [
+  [0.0, '#ffc79a', 1.5, '#c4cff0', '#6f7f5a', 0.7, '#c9d6ea', 0.55],
+  [0.07, '#ffe2bf', 2.1, '#dbe9fb', '#7d8f58', 0.8, '#c2e1ef', 0.0],
+  [0.16, '#fff1d6', 2.4, '#e6f2ff', '#7d8f58', 0.8, '#bfe3f0', 0.0],
+  [0.7, '#fff1d6', 2.4, '#e6f2ff', '#7d8f58', 0.8, '#bfe3f0', 0.0],
+  [0.82, '#ffd59a', 2.1, '#f3e2cf', '#8a8350', 0.8, '#f0d9bd', 0.15],
+  [0.92, '#ff9f7a', 1.3, '#9aa6d6', '#5e6a52', 0.75, '#a8a6cf', 0.7],
+  [1.0, '#ffc79a', 1.5, '#c4cff0', '#6f7f5a', 0.7, '#c9d6ea', 0.55],
+];
+
 const MAX_PEOPLE = 4000;
 const MAX_STAFF = 200;
 
@@ -97,7 +136,8 @@ export class World {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.scene.background = new THREE.Color('#bfe3f0');
-    this.scene.fog = new THREE.Fog('#bfe3f0', 60, 140);
+    this.scene.fog = new THREE.Fog('#bfe3f0', 70, 160);
+    this.renderer.toneMappingExposure = 1.05;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
 
     // A soft studio environment (generated once, no download) so metal and gloss have something to reflect.
@@ -105,24 +145,28 @@ export class World {
     const room = new RoomEnvironment();
     this.scene.environment = pmrem.fromScene(room, 0.04).texture;
     room.dispose();
-    this.scene.environmentIntensity = 0.35;
+    this.scene.environmentIntensity = 0.4;
     pmrem.dispose();
-    const hemi = new THREE.HemisphereLight('#fff6e0', '#6a8a5a', 0.65);
-    const sun = new THREE.DirectionalLight('#fff1d6', 2.2);
+    // Sky and bounce light; the sun casts soft shadows. Both are re-tinted through the day (see daylight()).
+    const hemi = new THREE.HemisphereLight('#e6f2ff', '#7d8f58', 0.8);
+    this.hemi = hemi;
+    const sun = new THREE.DirectionalLight('#fff1d6', 2.3);
     sun.position.set(-30, 50, -20);
     sun.castShadow = true;
     sun.shadow.mapSize.setScalar(SMALL_SCREEN ? 1024 : 2048);
     sun.shadow.camera.far = 200;
     sun.shadow.bias = -0.0003;
     sun.shadow.normalBias = 0.02;
+    sun.shadow.radius = 3;
     this.scene.add(hemi, sun, sun.target);
     this.sun = sun;
 
     const st = s();
     this.buildGround(st);
 
-    this.crowd = new Crowd(MAX_PEOPLE, this.scene, 1, !SMALL_SCREEN);
-    this.staff = new Crowd(MAX_STAFF, this.scene, 1.08, !SMALL_SCREEN);
+    this.crowd = new Crowd(MAX_PEOPLE, this.scene, 1.1, !SMALL_SCREEN);
+    this.staff = new Crowd(MAX_STAFF, this.scene, 1.18, !SMALL_SCREEN);
+    this.scene.add(this.selection);
 
     this.fallbackProps();
     this.gate = this.buildGate();
@@ -139,6 +183,7 @@ export class World {
       this.sceneryKey = '';
       this.furnitureVersion = -1;
       this.mapVersion = -1;
+      this.outsideKey = '';
       // Entrances and coaster cars come from scenery.glb too: rebuild the rides that used stand-ins.
       for (const v of this.rides.values()) v.key = '';
     });
@@ -149,6 +194,15 @@ export class World {
   }
 
   private sun: THREE.DirectionalLight;
+  private hemi: THREE.HemisphereLight;
+  /** 0 by day, up to 1 at dusk: lamps glow and pool light on the paths. */
+  night = 0;
+  /** Which ride to outline (the inspect panel's), read every frame. */
+  selected: () => number | null = () => null;
+  private selection = new THREE.Group();
+  private selectionKey = '';
+  private outsideKey = '';
+  private outside: PropSet[] = [];
   private groundParts: THREE.Object3D[] = [];
   private groundSize = '';
   private lastState: ParkState | null = null;
@@ -168,9 +222,14 @@ export class World {
     this.ground = new THREE.Mesh(g, this.grassMaterial(st.w, st.h));
     this.ground.position.set(st.w / 2, 0, st.h / 2);
     this.ground.receiveShadow = true;
-    const skirt = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.4, 1.2, st.h + 0.4), mat('#7a5a3a'));
+    // The park is a raised diorama board: a turf lip over layered earth, on a meadow.
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.4, 1.2, st.h + 0.4), [mat('#8a6440'), mat('#8a6440'), mat('#6fa452'), mat('#8a6440'), mat('#8a6440'), mat('#8a6440')]);
     skirt.position.set(st.w / 2, -0.61, st.h / 2);
-    const outside = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), mat('#9cc98a'));
+    skirt.receiveShadow = true;
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(st.w + 0.44, 0.12, st.h + 0.44), mat('#6fa452'));
+    lip.position.set(st.w / 2, -0.07, st.h / 2);
+    const outside = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), mat('#8dbd78'));
+    outside.receiveShadow = true;
     outside.position.set(st.w / 2, -1.2, st.h / 2);
     const tileGeo = new THREE.BoxGeometry(1, 0.06, 1);
     const n = st.w * st.h;
@@ -180,10 +239,21 @@ export class World {
     for (const m of [this.pathMesh, this.queueMesh]) { m.receiveShadow = true; m.count = 0; }
     this.litterMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.07, 0.02, 0.05), mat('#f4f0e6'), n * 3);
     this.litterMesh.count = 0;
-    this.groundParts = [this.ground, skirt, outside, this.pathMesh, this.queueMesh, this.litterMesh];
+    // Kerbs where a path meets grass, and rails along the sides of queue lines.
+    this.kerbMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.08, 0.07), mat('#cfc6b4', { flatShading: false, roughness: 0.9 }), n * 4);
+    this.railMesh = new THREE.InstancedMesh(railGeometry(), mat('#5b6b7a', { flatShading: false, metalness: 0.5, roughness: 0.45 }), n * 4);
+    for (const m of [this.kerbMesh, this.railMesh]) { m.receiveShadow = true; m.castShadow = !SMALL_SCREEN; m.count = 0; }
+    // Pools of lamplight on the paths at dusk (additive, no lights: cheap at any count).
+    this.pools = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#ffcf80', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), Math.max(64, n >> 2));
+    this.pools.count = 0;
+    this.pools.renderOrder = 2;
+    this.groundParts = [this.ground, skirt, lip, outside, this.pathMesh, this.queueMesh, this.litterMesh, this.kerbMesh, this.railMesh, this.pools];
     this.scene.add(...this.groundParts);
     this.groundSize = `${st.w}x${st.h}`;
   }
+  private kerbMesh!: THREE.InstancedMesh;
+  private railMesh!: THREE.InstancedMesh;
+  private pools!: THREE.InstancedMesh;
   private paving: THREE.Texture | undefined;
   private pathMat: THREE.Material | undefined;
   private queueMat: THREE.Material | undefined;
@@ -196,6 +266,8 @@ export class World {
     this.furnitureVersion = -1;
     this.sceneryKey = '';
     this.lastTileTick = -1;
+    this.outsideKey = '';
+    this.selectionKey = '';
   }
 
   private grassMaterial(w: number, h: number) {
@@ -207,7 +279,9 @@ export class World {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const r = hash(x, y);
       const v = r & 7;
-      ctx.fillStyle = (x + y) % 2 ? `hsl(100 38% ${52 + v * 0.6}%)` : `hsl(98 40% ${50 + v * 0.6}%)`;
+      // A soft checker (it reads as a grid) over broad, lighter and darker patches of meadow.
+      const patch = (hash(x >> 3, y >> 3) & 15) * 0.25 + (hash((x + 4) >> 3, (y + 4) >> 3) & 15) * 0.15;
+      ctx.fillStyle = (x + y) % 2 ? `hsl(${97 + (r & 3)} 40% ${48 + patch + v * 0.5}%)` : `hsl(${95 + (r & 3)} 41% ${46.6 + patch + v * 0.5}%)`;
       ctx.fillRect(x * px, y * px, px, px);
       ctx.fillStyle = 'rgba(255,255,240,0.035)';
       ctx.fillRect(x * px, y * px, px / 2, px);
@@ -371,7 +445,10 @@ export class World {
     const m = new THREE.Matrix4();
     const c = this.tmp.c;
     const bins: THREE.Matrix4[] = [];
-    let np = 0, nq = 0;
+    let np = 0, nq = 0, nk = 0, nr = 0;
+    const walk = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && (st.tiles[y * st.w + x] === Tile.Path || st.tiles[y * st.w + x] === Tile.Queue);
+    const entrances = new Set(st.rides.map((r) => r.ey * st.w + r.ex));
+    const gate = st.gate[1] * st.w + st.gate[0];
     for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
       const k = y * st.w + x;
       const t = st.tiles[k];
@@ -384,11 +461,21 @@ export class World {
         const i = t === Tile.Path ? np++ : nq++;
         im.setMatrixAt(i, m);
         im.setColorAt(i, c);
+        // Each open side gets a kerb (paths) or a rail (queues); never across an entrance or the gate.
+        for (let d = 0; d < 4; d++) {
+          const nx = x + DX[d], ny = y + DY[d];
+          if (walk(nx, ny) || entrances.has(ny * st.w + nx) || (k === gate && d === 2)) continue;
+          const queue = t === Tile.Queue;
+          if (queue && st.occ[ny * st.w + nx]) continue; // the ride's own side
+          m.makeRotationY(DX[d] ? Math.PI / 2 : 0).setPosition(x + 0.5 + DX[d] * (queue ? 0.44 : 0.475), queue ? 0.06 : 0.04, y + 0.5 + DY[d] * (queue ? 0.44 : 0.475));
+          if (queue) this.railMesh.setMatrixAt(nr++, m);
+          else this.kerbMesh.setMatrixAt(nk++, m);
+        }
       }
       if (st.bins[k]) bins.push(PropSet.at(x + 0.82, y + 0.82));
     }
-    this.pathMesh.count = np; this.queueMesh.count = nq;
-    for (const im of [this.pathMesh, this.queueMesh]) {
+    this.pathMesh.count = np; this.queueMesh.count = nq; this.kerbMesh.count = nk; this.railMesh.count = nr;
+    for (const im of [this.pathMesh, this.queueMesh, this.kerbMesh, this.railMesh]) {
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
       im.computeBoundingSphere();
@@ -425,6 +512,13 @@ export class World {
       fences.push(PropSet.at(st.w, y + 0.5, -Math.PI / 2));
     }
     this.propSet('lamp')?.set(lamps);
+    const pool = new THREE.Matrix4(), at = new THREE.Vector3();
+    const gp = tileCenter(st.gate[0], st.gate[1]);
+    const spots = [...lamps.map((l) => at.setFromMatrixPosition(l).clone()), gp.clone().setX(gp.x - 0.4), gp.clone().setX(gp.x + 0.4)];
+    this.pools.count = Math.min(spots.length, this.pools.instanceMatrix.count);
+    spots.slice(0, this.pools.count).forEach((p, i) => this.pools.setMatrixAt(i, pool.makeTranslation(p.x, 0.075, p.z)));
+    this.pools.instanceMatrix.needsUpdate = true;
+    this.pools.computeBoundingSphere();
     this.propSet('bench')?.set(benches);
     this.propSet('fence')?.set(fences);
   }
@@ -538,6 +632,89 @@ export class World {
     for (const [name, list] of lists) this.propSet(name)?.set(list);
   }
 
+  /** A wood round the board, on the meadow below it (decoration; built from the same tree props). */
+  private syncOutside(st: ParkState) {
+    const key = `${st.w}x${st.h}|${this.templates.size}`;
+    if (key === this.outsideKey) return;
+    this.outsideKey = key;
+    for (const p of this.outside) p.dispose();
+    this.outside = [];
+    const names = ['oak_a', 'oak_b', 'pine_a', 'pine_b', 'oak_c', 'pine_c'].filter((n) => this.templates.has(n));
+    if (!names.length) return;
+    const lists = names.map(() => [] as THREE.Matrix4[]);
+    const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), sc = new THREE.Vector3();
+    const band = 8, step = 1.5;
+    for (let gy = -band; gy < st.h + band; gy += step) for (let gx = -band; gx < st.w + band; gx += step) {
+      const ix = Math.round(gx * 2), iy = Math.round(gy * 2), r = hash(ix + 7919, iy + 104729);
+      const x = gx + ((r & 255) / 255 - 0.5) * 1.1, z = gy + (((r >>> 8) & 255) / 255 - 0.5) * 1.1;
+      const out = Math.max(-x, x - st.w, -z, z - st.h); // distance outside the board (negative: on it)
+      if (out < 1.2) continue;
+      // Thicker further out; a clearing in front of the gate.
+      if (((r >>> 16) & 255) / 255 > 0.35 + out * 0.08) continue;
+      if (z > st.h && Math.abs(x - st.gate[0] - 0.5) < 4) continue;
+      const i = (r >>> 24) % names.length;
+      const s = 1.15 + ((r >>> 20) & 15) / 25;
+      q.setFromAxisAngle(up, ((r >>> 12) & 63) / 10);
+      lists[i].push(new THREE.Matrix4().compose(pos.set(x, -1.2, z), q, sc.setScalar(s)));
+    }
+    names.forEach((n, i) => {
+      const p = new PropSet(this.templates.get(n)!, false);
+      p.set(lists[i]);
+      this.scene.add(p.group);
+      this.outside.push(p);
+    });
+  }
+
+  /** An outline round the ride the inspect panel shows, pulsing gently. */
+  private syncSelection(st: ParkState, time: number) {
+    const id = this.selected();
+    const r = id !== null ? st.rides.find((x) => x.id === id) : undefined;
+    const key = r ? `${r.id},${r.x},${r.y},${r.w},${r.h},${r.track?.length ?? 0}` : '';
+    if (key !== this.selectionKey) {
+      this.selectionKey = key;
+      for (const c of this.selection.children) (c as THREE.Mesh).geometry.dispose();
+      this.selection.clear();
+      if (r) {
+        const tiles: [number, number][] = r.track ? r.track.map((tp) => [tp.x, tp.y]) : [[r.x, r.y]];
+        const w = r.track ? 1 : r.w, h = r.track ? 1 : r.h;
+        const m = this.selectMat;
+        for (const [x, y] of tiles) {
+          const t = 0.06;
+          for (const [cx, cz, sx, sz] of [[x + w / 2, y + t / 2, w, t], [x + w / 2, y + h - t / 2, w, t], [x + t / 2, y + h / 2, t, h], [x + w - t / 2, y + h / 2, t, h]]) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.04, sz), m);
+            b.position.set(cx, 0.09, cz);
+            this.selection.add(b);
+          }
+        }
+      }
+    }
+    this.selection.visible = !!r;
+    if (r) this.selectMat.opacity = 0.65 + Math.sin(time * 4) * 0.25;
+  }
+  private selectMat = new THREE.MeshBasicMaterial({ color: '#ffd25a', transparent: true, opacity: 0.8, depthWrite: false });
+
+  /** Sun, sky and lamps follow the park's clock: morning, a long day, a golden evening, a blue dusk. */
+  private daylight(st: ParkState, alpha: number) {
+    const ph = (((st.tick + alpha) % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY / TICKS_PER_DAY;
+    let i = 0;
+    while (i < DAY.length - 2 && ph > DAY[i + 1][0]) i++;
+    const a = DAY[i], b = DAY[i + 1];
+    const f = Math.min(1, Math.max(0, (ph - a[0]) / (b[0] - a[0] || 1)));
+    const k = f * f * (3 - 2 * f);
+    const c = this.tmp.c;
+    this.sun.color.set(a[1]).lerp(c.set(b[1]), k);
+    this.sun.intensity = a[2] + (b[2] - a[2]) * k;
+    this.hemi.color.set(a[3]).lerp(c.set(b[3]), k);
+    this.hemi.groundColor.set(a[4]).lerp(c.set(b[4]), k);
+    this.hemi.intensity = a[5] + (b[5] - a[5]) * k;
+    (this.scene.background as THREE.Color).set(a[6]).lerp(c.set(b[6]), k);
+    (this.scene.fog as THREE.Fog).color.copy(this.scene.background as THREE.Color);
+    this.night = a[7] + (b[7] - a[7]) * k;
+    for (const [m, base] of glows) m.emissiveIntensity = base * (1 + this.night * 1.6);
+    (this.pools.material as THREE.MeshBasicMaterial).opacity = this.night * 0.55;
+    this.pools.visible = this.night > 0.02;
+  }
+
   private tmp = { m: new THREE.Matrix4(), h: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(1, 1, 1), p: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), c: new THREE.Color() };
   private chains = new Map<number, [number, number][]>();
   private chainsVersion = -1;
@@ -624,7 +801,18 @@ export class World {
     if (st.mapVersion !== this.furnitureVersion) { this.syncFurniture(st); this.furnitureVersion = st.mapVersion; }
     this.syncRides(st);
     this.syncScenery(st);
+    this.syncOutside(st);
     this.syncPeople(st, alpha);
+    this.syncSelection(st, time);
+    this.daylight(st, alpha);
+    // The build preview breathes, so it reads against busy scenery.
+    const breathe = 1 + Math.sin(time * 5) * 0.22;
+    this.ghost.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (!m || Array.isArray(m) || !m.transparent) return;
+      m.userData.baseOpacity ??= m.opacity;
+      m.opacity = Math.min(1, m.userData.baseOpacity * breathe);
+    });
     if ((st.tick & 31) === 0) this.syncLitter(st);
     for (const v of this.rides.values()) {
       const kind = this.c.rideTypes[v.ride.type].kind;
