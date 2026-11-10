@@ -25,7 +25,8 @@ function forceColour(vert: number, lat: number) {
   return new THREE.Color().setHSL(0.08 - 0.08 * k, 0.55 + 0.3 * k, 0.42);
 }
 
-export function buildCoaster(ride: Ride): CoasterView {
+/** car: an optional factory for a car model (front +z, sitting on y = 0); the car index picks its colour. */
+export function buildCoaster(ride: Ride, car?: (i: number) => THREE.Object3D | null): CoasterView {
   const g = new THREE.Group();
   const track = ride.track ?? [];
   const pts = trackPath(track);
@@ -130,13 +131,17 @@ export function buildCoaster(ride: Ride): CoasterView {
   const cars: THREE.Group[] = [];
   const carCols = ['#c0533a', '#f2b84b', '#5fb6e8'];
   for (let i = 0; i < CARS; i++) {
-    const car = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.26), mat(carCols[i % 3]));
-    body.position.y = 0.06;
-    body.castShadow = true;
-    car.add(body);
-    g.add(car);
-    cars.push(car);
+    const holder = new THREE.Group();
+    const model = car?.(i);
+    if (model) holder.add(model);
+    else {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.26), mat(carCols[i % 3]));
+      body.position.y = 0.06;
+      body.castShadow = true;
+      holder.add(body);
+    }
+    g.add(holder);
+    cars.push(holder);
   }
   const curve = new THREE.CatmullRomCurve3(vecs, closed, 'centripetal');
   const total = run?.s ? run.s[run.s.length - 1] : 1;
@@ -151,13 +156,13 @@ export function buildCoaster(ride: Ride): CoasterView {
     return run.s[lo] + (run.s[hi] - run.s[lo]) * f;
   };
   const place = (sMetres: number) => {
-    cars.forEach((car, i) => {
+    cars.forEach((c, i) => {
       let u = (sMetres / total) - (i * CAR_GAP) / (total * M);
       u = ((u % 1) + 1) % 1;
       const p = curve.getPointAt(u);
       const tan = curve.getTangentAt(u);
-      car.position.copy(p);
-      car.lookAt(p.clone().add(tan));
+      c.position.copy(p);
+      c.lookAt(p.clone().add(tan));
     });
   };
   place(0);

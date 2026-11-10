@@ -39,6 +39,15 @@ function hash(x: number, y: number) {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return (h ^ (h >>> 16)) >>> 0;
 }
+/** Scenery kind (sim id) → the prop names that can stand for it. Oaks mix in round, birch and blossom trees. */
+const VARIANTS: Record<number, string[]> = {
+  1: ['oak_a', 'oak_b', 'oak_c', 'oak_a', 'oak_d', 'oak_b', 'oak_e'],
+  2: ['flower', 'flower_b', 'flower_c'],
+  3: ['fountain'],
+  4: ['hedge', 'hedge', 'hedge_b'],
+  5: ['pine_a', 'pine_b', 'pine_c', 'pine_a'],
+};
+const CAR_COLOURS = ['#c0533a', '#f2b84b', '#5fb6e8'];
 const MAX_PEOPLE = 4000;
 const MAX_STAFF = 200;
 
@@ -131,6 +140,8 @@ export class World {
       this.sceneryKey = '';
       this.furnitureVersion = -1;
       this.mapVersion = -1;
+      // Entrances and coaster cars come from scenery.glb too: rebuild the rides that used stand-ins.
+      for (const v of this.rides.values()) v.key = '';
     });
     this.scene.add(this.ghost);
     this.target.copy(tileCenter(st.gate[0], st.gate[1] - 10));
@@ -430,13 +441,13 @@ export class World {
       const t = this.c.rideTypes[r.type];
       if (r.track) {
         // Coasters are generated from the sim's own track path.
-        const cv = buildCoaster(r);
+        const carModel = this.templates.get('car');
+        const cv = buildCoaster(r, carModel ? (i) => this.tinted(carModel, CAR_COLOURS[i % CAR_COLOURS.length]) : undefined);
         const root = new THREE.Group();
         root.userData.rideId = r.id;
         root.add(cv.group);
-        const entr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), mat('#c76a4a'));
-        entr.position.set(r.ex + 0.5, 0.03, r.ey + 0.5);
-        root.add(entr);
+        const st0 = r.track[0] ?? { x: r.x, y: r.y };
+        root.add(this.entrance(r.ex, r.ey, st0.x + 0.5, st0.y + 0.5, t.color));
         this.scene.add(root);
         this.rides.set(r.id, { ride: r, group: root, animate: () => {}, coaster: cv.animate, key });
         continue;
@@ -450,12 +461,7 @@ export class World {
       if (t.kind !== 'flat' || t.model === 'spookwalk') holder.rotation.y = [Math.PI, Math.PI / 2, 0, -Math.PI / 2][r.rot];
       root.userData.rideId = r.id;
       root.add(holder);
-      if (t.kind === 'flat') {
-        const entr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), mat('#c76a4a'));
-        entr.position.set(r.ex + 0.5, 0.03, r.ey + 0.5);
-        entr.receiveShadow = true;
-        root.add(entr);
-      }
+      if (t.kind === 'flat') root.add(this.entrance(r.ex, r.ey, r.x + r.w / 2, r.y + r.h / 2, t.color));
       this.scene.add(root);
       const view: RideView = { ride: r, group: root, animate, key };
       this.rides.set(r.id, view);
@@ -478,19 +484,53 @@ export class World {
     for (const [id, v] of this.rides) if (!seen.has(id)) { this.scene.remove(v.group); disposeTree(v.group); this.rides.delete(id); }
   }
 
+  /** A clone of a prop with its "accent" parts painted `color` (a ride's colour). */
+  private tinted(template: THREE.Object3D, color: string) {
+    const o = template.clone();
+    o.position.set(0, 0, 0);
+    o.traverse((x) => {
+      const m = x as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.castShadow = m.receiveShadow = true;
+      if (!Array.isArray(m.material) && m.material.name.startsWith('pw_accent')) m.material = accent(m.material, color);
+    });
+    return o;
+  }
+
+  /** A ride's entrance tile: an arch in the ride's colour facing away from the ride (cx, cz), toward the path. */
+  private entrance(ex: number, ey: number, cx: number, cz: number, color: string): THREE.Object3D {
+    const t = this.templates.get('entrance');
+    const dx = ex + 0.5 - cx, dz = ey + 0.5 - cz;
+    if (!t) {
+      const entr = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), mat('#c76a4a'));
+      entr.position.set(ex + 0.5, 0.03, ey + 0.5);
+      entr.receiveShadow = true;
+      return entr;
+    }
+    const o = this.tinted(t, color);
+    o.position.set(ex + 0.5, 0, ey + 0.5);
+    // The arch's front (+z) points along the larger offset, so it opens onto the path, not the ride.
+    o.rotation.y = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Math.PI / 2 : -Math.PI / 2) : (dz > 0 ? 0 : Math.PI);
+    return o;
+  }
+
   private syncScenery(st: ParkState) {
     let key = '';
     for (let k = 0; k < st.scenery.length; k++) if (st.scenery[k]) key += k + ':' + st.scenery[k] + ',';
     if (key === this.sceneryKey) return;
     this.sceneryKey = key;
     const lists = new Map<string, THREE.Matrix4[]>();
-    for (const name of ['oak_a', 'oak_b', 'pine_a', 'pine_b', 'flower', 'fountain', 'hedge']) lists.set(name, []);
+    for (const list of Object.values(VARIANTS)) for (const name of list) lists.set(name, []);
     for (let k = 0; k < st.scenery.length; k++) {
       const id = st.scenery[k];
       if (!id) continue;
       const x = k % st.w, y = Math.floor(k / st.w), r = hash(x, y);
       const tree = id === 1 || id === 5;
-      const name = id === 1 ? (r & 1 ? 'oak_b' : 'oak_a') : id === 5 ? (r & 1 ? 'pine_b' : 'pine_a') : id === 2 ? 'flower' : id === 3 ? 'fountain' : 'hedge';
+      // Each kind has a few looks (scenery.glb); a hash of the tile picks one, falling back to the first.
+      const looks = (VARIANTS[id] ?? VARIANTS[4]).filter((n) => this.templates.has(n));
+      // Trees vary tile by tile; beds and hedges by 4×4 block, so a planted row or patch matches.
+      const pick = tree ? r >>> 11 : hash(x >> 2, y >> 2) >>> 11;
+      const name = looks.length ? looks[pick % looks.length] : VARIANTS[id]?.[0] ?? 'hedge';
       // Trees turn and vary in size; beds, fountains and hedges stay square to the grid.
       const yaw = tree ? (k * 1.7) % (Math.PI * 2) : ((r >>> 3) & 3) * (Math.PI / 2);
       const s = tree ? 0.85 + ((r >>> 5) % 31) / 100 : 1;
