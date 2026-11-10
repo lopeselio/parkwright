@@ -14,40 +14,51 @@ import math
 import os
 import sys
 
+import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
 PALETTE = {
-    "cream": (0.96, 0.92, 0.82),
-    "white": (0.97, 0.96, 0.93),
-    "wood": (0.55, 0.38, 0.24),
-    "darkwood": (0.36, 0.24, 0.16),
+    # One warm, slightly sun-faded set so rides, stalls and scenery read as one park under the game's light.
+    "cream": (0.97, 0.92, 0.81),
+    "white": (0.96, 0.95, 0.92),
+    "wood": (0.60, 0.42, 0.27),
+    "darkwood": (0.38, 0.26, 0.18),
     "dark": (0.17, 0.16, 0.22),
-    "iron": (0.20, 0.22, 0.24),
-    "steel": (0.72, 0.74, 0.78),
-    "gold": (0.85, 0.66, 0.29),
-    "red": (0.87, 0.33, 0.30),
-    "orange": (0.93, 0.56, 0.24),
-    "yellow": (0.95, 0.76, 0.30),
-    "green": (0.45, 0.76, 0.43),
-    "teal": (0.30, 0.66, 0.68),
-    "blue": (0.37, 0.62, 0.86),
-    "navy": (0.21, 0.29, 0.47),
-    "purple": (0.55, 0.42, 0.82),
-    "pink": (0.94, 0.56, 0.75),
-    "glow": (1.0, 0.82, 0.48),
-    "lamp": (1.0, 0.93, 0.74),
+    "plum": (0.33, 0.27, 0.42),
+    "slate": (0.24, 0.24, 0.33),
+    "iron": (0.19, 0.21, 0.23),
+    "steel": (0.74, 0.76, 0.80),
+    "gold": (0.88, 0.68, 0.30),
+    "red": (0.88, 0.32, 0.29),
+    "orange": (0.95, 0.57, 0.24),
+    "yellow": (0.97, 0.78, 0.30),
+    "green": (0.42, 0.74, 0.42),
+    "teal": (0.28, 0.65, 0.66),
+    "blue": (0.35, 0.61, 0.87),
+    "navy": (0.20, 0.28, 0.46),
+    "purple": (0.56, 0.42, 0.83),
+    "pink": (0.95, 0.57, 0.74),
+    "glow": (1.0, 0.80, 0.45),
+    "lamp": (1.0, 0.92, 0.72),
     "beacon": (1.0, 0.30, 0.25),
-    "stone": (0.80, 0.78, 0.74),
-    "concrete": (0.70, 0.69, 0.66),
-    "brick": (0.70, 0.40, 0.31),
+    "stone": (0.82, 0.80, 0.75),
+    "concrete": (0.71, 0.70, 0.67),
+    "brick": (0.72, 0.41, 0.31),
+    "terracotta": (0.80, 0.47, 0.32),
     "glass": (0.70, 0.86, 0.95),
-    "water": (0.38, 0.72, 0.88),
-    "leaf": (0.37, 0.62, 0.29),
-    "leaf2": (0.47, 0.70, 0.33),
-    "leaf3": (0.30, 0.52, 0.30),
-    "pine": (0.22, 0.46, 0.30),
-    "pine2": (0.28, 0.54, 0.34),
+    "water": (0.36, 0.71, 0.88),
+    "foam": (0.86, 0.95, 1.0),
+    "leaf": (0.36, 0.62, 0.29),
+    "leaf2": (0.48, 0.71, 0.33),
+    "leaf3": (0.27, 0.50, 0.28),
+    "leaf4": (0.58, 0.76, 0.35),
+    "autumn": (0.88, 0.60, 0.26),
+    "blossom": (0.96, 0.72, 0.80),
+    "blossom2": (0.99, 0.84, 0.88),
+    "birch": (0.90, 0.88, 0.82),
+    "pine": (0.21, 0.45, 0.31),
+    "pine2": (0.27, 0.53, 0.35),
     "soil": (0.38, 0.27, 0.19),
     "grave": (0.62, 0.63, 0.66),
     # Recoloured per ride by the client (a stall's awning takes the stall's colour).
@@ -174,7 +185,7 @@ def cyl(r, depth, loc, material, parent=None, verts=16, rot=(0, 0, 0), r2=None, 
     return _finish(bpy.context.active_object, material, parent, bevel)
 
 
-def cone(r, depth, loc, material, parent=None, verts=16, rot=(0, 0, 0), stripes=None):
+def cone(r, depth, loc, material, parent=None, verts=16, rot=(0, 0, 0), stripes=None, smooth=True):
     """A cone; `stripes` = (mat_a, mat_b) paints alternate segments, like a tent roof."""
     bpy.ops.mesh.primitive_cone_add(radius1=r, radius2=0, depth=depth, location=loc, vertices=verts, rotation=rot)
     o = bpy.context.active_object
@@ -182,7 +193,7 @@ def cone(r, depth, loc, material, parent=None, verts=16, rot=(0, 0, 0), stripes=
         _finish(o, list(stripes), parent)
         _stripe(o)
         return o
-    return _finish(o, material, parent)
+    return _finish(o, material, parent, smooth=smooth)
 
 
 def band(r, depth, loc, stripes, parent=None, verts=24, r2=None):
@@ -317,6 +328,88 @@ def sign(body, loc, width, height, board, letters, parent=None, rot_z=0.0, size=
     box((width + 0.04, 0.03, 0.025), (0, 0, height / 2 + 0.006), brass(), g, bevel=0.006)
     box((width + 0.04, 0.03, 0.025), (0, 0, -height / 2 - 0.006), brass(), g, bevel=0.006)
     text(body, (0, -0.025, 0), size or height * 0.62, letters, g)
+    return g
+
+
+def prism(profile, length, loc, material, parent=None, bevel=0.01):
+    """A prism along x: `profile` is a convex outline [(y, z), ...] extruded `length` and centred on loc
+    (gables, wedges, roof ridges)."""
+    n = len(profile)
+    h = length / 2
+    verts = [(-h, y, z) for y, z in profile] + [(h, y, z) for y, z in profile]
+    faces = [list(range(n))[::-1], list(range(n, 2 * n))] + [[i, (i + 1) % n, n + (i + 1) % n, n + i] for i in range(n)]
+    me = bpy.data.meshes.new("prism")
+    me.from_pydata(verts, [], faces)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new("prism", me)
+    o.location = loc
+    bpy.context.scene.collection.objects.link(o)
+    return _finish(o, material, parent, bevel)
+
+
+def _mesh(name, verts, faces, loc, material, parent, smooth=False, bevel=0.0):
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    o.location = loc
+    bpy.context.scene.collection.objects.link(o)
+    return _finish(o, material, parent, bevel, smooth=smooth)
+
+
+def hip_roof(w, d, h, loc, material, parent=None, ridge=None):
+    """A hipped roof, flat-shaded: a w x d base at loc's z rising h to a ridge along the longer side."""
+    hw, hd = w / 2, d / 2
+    if ridge is None:
+        ridge = max(0.0, abs(w - d) / 2)
+    base = [(-hw, -hd, 0), (hw, -hd, 0), (hw, hd, 0), (-hw, hd, 0)]
+    if w >= d:
+        top = [(-ridge, 0, h), (ridge, 0, h)]
+        faces = [[0, 1, 5, 4], [1, 2, 5], [2, 3, 4, 5], [3, 0, 4], [0, 3, 2, 1]]
+    else:
+        top = [(0, -ridge, h), (0, ridge, h)]
+        faces = [[0, 1, 4], [1, 2, 5, 4], [2, 3, 5], [3, 0, 4, 5], [0, 3, 2, 1]]
+    return _mesh("hip", base + top, faces, loc, material, parent)
+
+
+def bunting(p0, p1, sag, colours, parent=None, n=7, size=0.05):
+    """A string of pennants between two points (x, y, z), sagging in the middle."""
+    a, b = Vector(p0), Vector(p1)
+    pts = []
+    for i in range(n + 1):
+        t = i / n
+        p = a.lerp(b, t)
+        p.z -= sag * 4 * t * (1 - t)
+        pts.append(p)
+    for i in range(n):
+        rod(pts[i], pts[i + 1], 0.004, iron(), parent, verts=3)
+    d = b - a
+    rz = math.atan2(d.y, d.x)
+    for i in range(1, n):
+        p = pts[i]
+        o = cone(size * 0.55, size, (p.x, p.y, p.z - size / 2), canvas(colours[i % len(colours)]), parent, verts=3, rot=(math.pi, 0, rz + math.pi / 2))
+        o.scale = (1, 0.3, 1)
+
+
+def valance(width, loc, height, stripes, parent=None, n=8, rot_z=0.0):
+    """A straight striped fringe for an awning edge: n alternating panels across `width`, each with a
+    rounded tongue below, facing -Y."""
+    g = empty("valpivot", loc, parent)
+    g.rotation_euler = (0, 0, rot_z)
+    w = width / n
+    for i in range(n):
+        x = -width / 2 + w * (i + 0.5)
+        box((w, 0.012, height), (x, 0, 0), stripes[i % 2], g, bevel=0)
+        b = ball(w * 0.5, (x, 0, -height / 2), stripes[i % 2], g, seg=8, rings=4)
+        b.scale = (1, 0.12, 0.7)
     return g
 
 
