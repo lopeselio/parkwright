@@ -4,7 +4,7 @@ import { DX, DY, SUB, Tile, queueChain, type ParkState, type Ride } from '@parkw
 import type { Content } from '@parkwright/content';
 import { buildModel, buildScenery, mat, type Animator } from './models.ts';
 import { loadModel, loadProps } from './assets.ts';
-import { buildCoaster } from './coaster.ts';
+import { buildCoaster, CAR_COLOURS } from './coaster.ts';
 import { Crowd } from './people.ts';
 import { PropSet } from './props.ts';
 
@@ -47,7 +47,6 @@ const VARIANTS: Record<number, string[]> = {
   4: ['hedge', 'hedge', 'hedge_b'],
   5: ['pine_a', 'pine_b', 'pine_c', 'pine_a'],
 };
-const CAR_COLOURS = ['#c0533a', '#f2b84b', '#5fb6e8'];
 const MAX_PEOPLE = 4000;
 const MAX_STAFF = 200;
 
