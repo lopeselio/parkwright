@@ -1,5 +1,5 @@
 // Low-poly people, instanced: legs (two instances each, so they can stride), torso with arms, head, hair.
-// Four draw calls for the whole crowd. Front is +z; the origin is between the feet.
+// Five draw calls for the whole crowd (with a soft contact shadow under each person). Front is +z; the origin is between the feet.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -52,6 +52,9 @@ export class Crowd {
   readonly torso: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly hair: THREE.InstancedMesh;
+  /** A dark blot under the feet, so people stay readable on paths where shadows are off (phones) or soft. */
+  readonly blot: THREE.InstancedMesh;
+  private t = new THREE.Matrix4();
   private n = 0;
   private m = new THREE.Matrix4();
   private l = new THREE.Matrix4();
@@ -65,6 +68,12 @@ export class Crowd {
     this.torso = new THREE.InstancedMesh(torsoGeometry(), material(), capacity);
     this.head = new THREE.InstancedMesh(headGeometry(), material(0.6), capacity);
     this.hair = new THREE.InstancedMesh(hairGeometry(), material(0.9), capacity);
+    this.blot = new THREE.InstancedMesh(new THREE.CircleGeometry(0.075 * scale, 10).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: '#1d2a14', transparent: true, opacity: 0.22, depthWrite: false }), capacity);
+    this.blot.count = 0;
+    this.blot.frustumCulled = false;
+    this.blot.renderOrder = 1;
+    scene.add(this.blot);
     this.one.setScalar(scale);
     for (const im of this.meshes()) {
       im.castShadow = shadows;
@@ -87,6 +96,7 @@ export class Crowd {
     this.torso.setMatrixAt(i, this.m);
     this.head.setMatrixAt(i, this.m);
     this.hair.setMatrixAt(i, this.m);
+    this.blot.setMatrixAt(i, this.t.makeTranslation(p.x, 0.072, p.z));
     this.torso.setColorAt(i, shirt);
     this.head.setColorAt(i, skin);
     this.hair.setColorAt(i, hair);
@@ -101,7 +111,8 @@ export class Crowd {
 
   end() {
     this.legs.count = this.n * 2;
-    this.torso.count = this.head.count = this.hair.count = this.n;
+    this.torso.count = this.head.count = this.hair.count = this.blot.count = this.n;
+    this.blot.instanceMatrix.needsUpdate = true;
     for (const im of this.meshes()) {
       im.instanceMatrix.needsUpdate = true;
       if (im.instanceColor) im.instanceColor.needsUpdate = true;
