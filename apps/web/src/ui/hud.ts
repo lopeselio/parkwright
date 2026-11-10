@@ -3,8 +3,8 @@ import type { Game } from '../game.ts';
 import type { Tools } from './tools.ts';
 import type { Cloud } from '../cloud.ts';
 import { $, cr, h, toast } from './dom.ts';
+import { icon } from './icons.ts';
 
-const ICON: Record<string, string> = { select: '☝', path: '▦', queue: '⋯', ride: '🎠', stall: '🥨', scenery: '🌳', bin: '🗑', bulldoze: '✕' };
 
 export class Hud {
   private selected: number | null = null;
@@ -57,19 +57,19 @@ export class Hud {
     const key = [s.name, this.game.speed, this.panel, s.objective.status, muted].join('|');
     if (key !== this.last || !this.topRefs) {
       this.last = key;
-      const speeds = [0, 1, 2, 4].map((n) => h('button', { class: `speed ${this.game.speed === n ? 'on' : ''}`, title: n ? `${n}× speed` : 'pause', onclick: () => { this.game.speed = n; this.renderTop(); } }, n ? `${n}×` : '❚❚'));
+      const speeds = [0, 1, 2, 4].map((n) => h('button', { class: `speed ${this.game.speed === n ? 'on' : ''}`, title: n ? `${n}× speed` : 'Pause (Space)', 'aria-label': n ? `${n}× speed` : 'Pause', 'aria-pressed': String(this.game.speed === n), onclick: () => { this.game.speed = n; this.renderTop(); } }, n ? `${n}×` : icon('pause', 16)));
       const refs = { date: h('span', { class: 'date' }), cash: h('b'), bar: h('i'), rating: h('b'), visitors: h('b'), save: h('div', { class: 'save-err' }) };
       this.topRefs = refs;
       $('#top').replaceChildren(
-        h('div', { class: 'brand' }, h('b', {}, s.name), refs.date),
+        h('div', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, icon('ride', 18)), h('div', { class: 'brand-text' }, h('b', {}, s.name), refs.date)),
         h('div', { class: 'stats', 'data-tour': 'stats' },
-        h('div', { class: 'stat' }, h('label', {}, 'Cash'), refs.cash),
-        h('div', { class: 'stat' }, h('label', {}, 'Rating'), h('div', { class: 'bar' }, refs.bar), refs.rating),
-        h('div', { class: 'stat' }, h('label', {}, 'Visitors'), refs.visitors)),
+        h('div', { class: 'stat cash' }, icon('cash', 18), h('label', {}, 'Cash'), refs.cash),
+        h('div', { class: 'stat rating' }, icon('rating', 18), h('label', {}, 'Rating'), h('div', { class: 'bar' }, refs.bar), refs.rating),
+        h('div', { class: 'stat visitors' }, icon('visitors', 18), h('label', {}, 'Visitors'), refs.visitors)),
         refs.save,
         h('div', { class: 'speeds' }, ...speeds,
           // Sound (main.ts owns the audio; the bar only reflects and toggles it).
-          h('button', { class: 'speed sound', 'aria-pressed': String(!muted), 'aria-label': 'Sound', title: muted ? 'Sound off (M)' : 'Sound on (M)', onclick: () => dispatchEvent(new Event('pw:sound-toggle')) }, muted ? '🔇' : '🔊')),
+          h('button', { class: 'speed sound', 'aria-pressed': String(!muted), 'aria-label': 'Sound', title: muted ? 'Sound off (M)' : 'Sound on (M)', onclick: () => dispatchEvent(new Event('pw:sound-toggle')) }, icon(muted ? 'soundOff' : 'soundOn', 17))),
         h('div', { class: 'menu' },
           ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', 'data-tour': p, onclick: () => {
             this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
@@ -78,9 +78,9 @@ export class Hud {
               void this.cloud.chain().then((c) => { this.chain = c; this.renderSide(); });
               void this.cloud.verification().then((v) => { this.verification = v; this.renderSide(); });
             }
-          } }, p[0].toUpperCase() + p.slice(1))),
-          h('button', { class: 'term-btn', title: 'Terminal (`)', 'aria-label': 'Terminal', onclick: () => this.toggleTerminal() }, '>_', h('span', { class: 'term-label' }, ' Terminal')),
-          h('button', { class: 'help-btn', 'data-tour': 'help', title: 'How to play (?)', 'aria-label': 'How to play', onclick: () => dispatchEvent(new Event('pw:help')) }, '?'),
+          } }, icon(({ finance: 'finance', visitors: 'people', staff: 'staff', parks: 'parks' } as const)[p], 17), h('span', { class: 'menu-label' }, p[0].toUpperCase() + p.slice(1)))),
+          h('button', { class: 'term-btn', title: 'Terminal (`)', 'aria-label': 'Terminal', onclick: () => this.toggleTerminal() }, icon('terminal', 17), h('span', { class: 'term-label' }, 'Terminal')),
+          h('button', { class: 'help-btn', 'data-tour': 'help', title: 'How to play (?)', 'aria-label': 'How to play', onclick: () => dispatchEvent(new Event('pw:help')) }, icon('help', 18)),
         ),
         s.objective.status !== 'pending' ? h('div', { class: `goal ${s.objective.status}` }, s.objective.status === 'won' ? 'Goal reached!' : 'Goal missed') : '',
       );
@@ -93,7 +93,7 @@ export class Hud {
     r.cash.className = s.cash < 0 ? 'neg' : '';
     const pct = s.rating / 10;
     r.bar.style.width = `${pct}%`;
-    r.bar.style.background = pct > 60 ? '#7ccf7a' : pct > 40 ? '#f2b84b' : '#e85d5d';
+    r.bar.style.background = pct > 60 ? 'var(--good-bar)' : pct > 40 ? 'var(--warn-bar)' : 'var(--bad-bar)';
     r.rating.textContent = String(s.rating);
     r.visitors.textContent = String(s.visitors.length);
     r.save.textContent = this.game.saveError ?? '';
@@ -101,7 +101,7 @@ export class Hud {
 
   renderTools() {
     const t = this.tools.tool;
-    const btn = (id: string, label: string, on: boolean, click: () => void) => h('button', { class: `tool ${on ? 'on' : ''}`, title: label, 'data-tour': id, onclick: click }, h('span', { class: 'ic' }, ICON[id]), h('span', {}, label));
+    const btn = (id: string, label: string, on: boolean, click: () => void) => h('button', { class: `tool ${on ? 'on' : ''}`, title: label, 'aria-pressed': String(on), 'data-tour': id, onclick: click }, h('span', { class: 'ic' }, icon(id, 22)), h('span', {}, label));
     $('#tools').replaceChildren(
       btn('select', 'Inspect', t.kind === 'select', () => { this.drawer = null; this.tools.set({ kind: 'select' }); }),
       btn('path', 'Path', t.kind === 'path' && !t.queue, () => { this.drawer = null; this.tools.set({ kind: 'path', queue: false }); }),
@@ -119,9 +119,9 @@ export class Hud {
     d.classList.add('open');
     const c = this.game.content;
     if (this.drawer === 'scenery') {
-      d.replaceChildren(h('h3', {}, 'Scenery'), ...SCENERY.slice(1).map((sc) => {
+      d.replaceChildren(h('h3', {}, icon('scenery', 18), 'Scenery'), ...SCENERY.slice(1).map((sc) => {
         const k = sc.name.split(' ')[0];
-        return h('button', { class: `card ${t.kind === 'scenery' && t.scenery === k ? 'on' : ''}`, onclick: () => this.tools.set({ kind: 'scenery', scenery: k }) }, h('b', {}, sc.name), h('small', {}, `${cr(sc.cost)} · beauty ${sc.beauty}`));
+        return h('button', { class: `card ${t.kind === 'scenery' && t.scenery === k ? 'on' : ''}`, onclick: () => this.tools.set({ kind: 'scenery', scenery: k }) }, h('i', { class: 'sw', style: `background:${({ oak: '#5f9e4a', flower: '#e8789f', fountain: '#5fb6e8', hedge: '#3f7d4d', pine: '#2f6e46' } as Record<string, string>)[k] ?? '#7ccf7a'}` }), h('b', {}, sc.name), h('small', {}, `${cr(sc.cost)} · beauty ${sc.beauty}`));
       }), h('p', { class: 'tip' }, 'Drag to fill an area. Visitors love gardens and fountains near paths and rides.'));
       return;
     }
@@ -130,7 +130,7 @@ export class Hud {
     const coasterCard = this.drawer === 'rides' ? h('button', { class: 'card', onclick: () => { this.drawer = null; this.tools.set({ kind: 'coaster', dir: 1 }); } },
       h('i', { class: 'sw', style: 'background:#b07a4a' }), h('b', {}, 'Timber Coaster'), h('small', {}, 'build it piece by piece · from 300 cr')) : '';
     d.replaceChildren(
-      h('h3', {}, this.drawer === 'rides' ? 'Rides' : 'Stalls & facilities'),
+      h('h3', {}, icon(this.drawer === 'rides' ? 'ride' : 'stall', 18), this.drawer === 'rides' ? 'Rides' : 'Stalls & facilities'),
       coasterCard,
       ...types.map((r) => h('button', { class: `card ${t.kind === 'ride' && t.type === r.id ? 'on' : ''}`, onclick: () => this.tools.set({ kind: 'ride', type: r.id, rot: (t.kind === 'ride' ? t.rot : 2) as Dir }) },
         h('i', { class: 'sw', style: `background:${r.color}` }),
@@ -229,10 +229,10 @@ export class Hud {
       const thoughts = new Map<string, number>();
       for (const v of s.visitors) for (const th of v.thoughts) if (th.ride === r.id) thoughts.set(th.kind, (thoughts.get(th.kind) ?? 0) + 1);
       const run = (type: string, params: Record<string, unknown>) => { const res = this.game.run(type, params); if (!res.ok) toast(res.error, 'err', res.hint); this.renderSide(); };
-      const ratingRow = (label: string, v: number, max = 1000) => h('div', { class: 'rrow' }, h('label', {}, label), h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, (v / max) * 100)}%` })), h('b', {}, (v / 100).toFixed(2)));
+      const ratingRow = (label: string, v: number, max = 1000) => h('div', { class: `rrow k-${label.toLowerCase()}` }, h('label', {}, label), h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, (v / max) * 100)}%` })), h('b', {}, (v / 100).toFixed(2)));
       side.classList.add('open');
       side.replaceChildren(
-        h('header', {}, h('h2', {}, r.name), h('button', { class: 'x', onclick: () => { this.selected = null; side.classList.remove('open'); } }, '×')),
+        h('header', {}, h('h2', {}, r.name), h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.selected = null; side.classList.remove('open'); } }, icon('close', 18))),
         h('div', { class: `status ${r.status}` }, r.status),
         attraction && r.ratings ? h('div', {}, ratingRow('Excitement', r.ratings.e), ratingRow('Intensity', r.ratings.i), ratingRow('Nausea', r.ratings.n)) : '',
         r.stats ? h('p', { class: 'muted' }, `${r.stats.length} m · ${r.stats.duration} s · top ${r.stats.maxSpeed} m/s · drop ${r.stats.maxDrop} m · ${r.stats.maxVertG}g / ${r.stats.minVertG}g · ${r.stats.maxLatG}g lateral`) : '',
@@ -265,7 +265,7 @@ export class Hud {
       const last = s.history.slice(-7);
       const net = last.reduce((a, d) => a + d.income - d.costs, 0);
       side.replaceChildren(
-        h('header', {}, h('h2', {}, 'Finance'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
+        h('header', {}, h('h2', {}, 'Finance'), h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, icon('close', 18))),
         h('table', { class: 'ledger' }, h('tr', {}, h('th', {}, ''), h('th', {}, 'Week'), h('th', {}, 'Total')), ...rows.map((k) => h('tr', {}, h('td', {}, k), h('td', { class: s.ledgerWeek[k] < 0 ? 'neg' : '' }, cr(s.ledgerWeek[k])), h('td', { class: s.ledgerTotal[k] < 0 ? 'neg' : '' }, cr(s.ledgerTotal[k]))))),
         h('p', {}, `Last 7 days net: `, h('b', { class: net < 0 ? 'neg' : '' }, cr(net))),
         h('div', { class: 'spark' }, ...s.history.slice(-28).map((d) => h('i', { title: `day ${d.day + 1}: ${cr(d.income)}`, style: `height:${Math.min(100, d.income / 600)}%` }))),
@@ -283,8 +283,8 @@ export class Hud {
       for (const v of s.visitors) for (const t of v.thoughts) m.set(t.kind, (m.get(t.kind) ?? 0) + 1);
       const avg = (k: 'happy' | 'energy' | 'hunger' | 'thirst') => (s.visitors.length ? Math.round(s.visitors.reduce((a, v) => a + v[k], 0) / s.visitors.length) : 0);
       side.replaceChildren(
-        h('header', {}, h('h2', {}, `Visitors (${s.visitors.length})`), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
-        ...(['happy', 'energy', 'hunger', 'thirst'] as const).map((k) => h('div', { class: 'rrow' }, h('label', {}, k), h('div', { class: 'bar' }, h('i', { style: `width:${(avg(k) / 255) * 100}%` })), h('b', {}, String(avg(k))))),
+        h('header', {}, h('h2', {}, `Visitors (${s.visitors.length})`), h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, icon('close', 18))),
+        ...(['happy', 'energy', 'hunger', 'thirst'] as const).map((k) => h('div', { class: `rrow k-${k}` }, h('label', {}, k), h('div', { class: 'bar' }, h('i', { style: `width:${(avg(k) / 255) * 100}%` })), h('b', {}, String(avg(k))))),
         h('h4', {}, 'What they are thinking'),
         ...[...m].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => h('div', { class: 'thought' }, h('b', {}, String(n)), ` ${k}`)),
         h('p', { class: 'muted' }, `${s.totalVisitors} visitors so far.`),
@@ -295,7 +295,7 @@ export class Hud {
       side.classList.add('open');
       const link = this.cloud.link;
       side.replaceChildren(
-        h('header', {}, h('h2', {}, 'Parks'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
+        h('header', {}, h('h2', {}, 'Parks'), h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, icon('close', 18))),
         this.game.visiting ? h('div', { class: 'row' }, h('span', { class: 'muted' }, "You're playing a copy of someone else's park. Your own park is safe."),
           h('button', { onclick: () => { if (!this.cloud.home()) toast('no saved park of your own yet', 'err'); this.last = ''; this.renderTop(); this.renderSide(); } }, 'Back to my park')) : '',
         h('p', { class: 'muted' }, link ? `Your park is in the cloud and saves itself every day. ${this.cloud.status}` : 'Publish your park to get a link anyone can open. It keeps saving itself every day.'),
@@ -337,7 +337,7 @@ export class Hud {
     if (this.panel === 'staff') {
       side.classList.add('open');
       side.replaceChildren(
-        h('header', {}, h('h2', {}, 'Staff'), h('button', { class: 'x', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, '×')),
+        h('header', {}, h('h2', {}, 'Staff'), h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, icon('close', 18))),
         h('div', { class: 'row wrap' }, ...(Object.values(c.staff)).map((st) => h('button', { onclick: () => { const r = this.game.run('staff.hire', { role: st.role }); toast(r.ok ? r.message ?? 'hired' : r.error, r.ok ? 'ok' : 'err'); this.renderSide(); } }, `Hire ${st.name} · ${cr(weeklyWage(s, c, st.role))}/wk`))),
         h('p', { class: 'muted' }, 'Handymen sweep litter. Mechanics fix breakdowns and inspect rides. Entertainers cheer up nearby visitors.'),
         ...s.staff.map((st) => h('div', { class: 'staff' }, h('b', {}, st.name), h('span', {}, st.task !== null ? ` → ${findRide(s, st.task)?.name ?? ''}` : ''), h('button', { class: 'small', onclick: () => { this.game.run('staff.fire', { staff: st.id }); this.renderSide(); } }, 'Fire'))),
