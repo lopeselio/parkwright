@@ -6,6 +6,7 @@ import type { Game } from '../game.ts';
 import type { World } from '../render/world.ts';
 import type { Tools } from './tools.ts';
 import { $, h } from './dom.ts';
+import { icon } from './icons.ts';
 import { goalText, objectiveOf, rulesOf } from '@parkwright/sim';
 import type { Scenario } from '@parkwright/content';
 
@@ -87,7 +88,7 @@ export class Onboarding {
       if (e.key === 'Enter' || e.key === ' ') e.preventDefault();
     };
     addEventListener('keydown', refocus, true);
-    const focusIn = () => (el.querySelector<HTMLElement>('[data-autofocus]') ?? el.querySelector<HTMLElement>('button'))?.focus();
+    const focusIn = () => (el.querySelector<HTMLElement>('[data-autofocus]') ?? el.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
     focusIn();
   }
 
@@ -113,8 +114,12 @@ export class Onboarding {
     const panel = h('div', { class: 'ob-title' });
     let escClose = false;
     const menu = () => { escClose = false; panel.replaceChildren(
-      h('div', { class: 'ob-logo' }, h('span', { class: 'ob-flag', 'aria-hidden': 'true' }, '🎡'), h('h1', {}, 'Parkwright')),
+      h('div', { class: 'ob-logo' }, h('span', { class: 'ob-flag', 'aria-hidden': 'true' }, icon('wheel', 40)), h('h1', {}, 'Parkwright')),
       h('p', { class: 'ob-tag' }, 'Lay the paths, raise the rides, keep the crowds happy.'),
+      h('ul', { class: 'ob-chips', 'aria-label': 'Features' },
+        h('li', {}, icon('coaster', 16), 'Build piece by piece'),
+        h('li', {}, icon('people', 16), 'Guests with opinions'),
+        h('li', {}, icon('check', 16), 'Verified on NEAR testnet')),
       h('div', { class: 'ob-menu' },
         h('button', { class: 'primary big', 'data-autofocus': true, onclick: afterwards }, fresh ? 'Play' : 'Continue', h('small', {}, fresh ? s.name : `${s.name} · day ${s.day + 1}`)),
         h('button', { class: 'big', onclick: () => newPark() }, 'New park', h('small', {}, 'pick a scenario and a name')),
@@ -168,10 +173,10 @@ export class Onboarding {
   welcome() {
     const sc = this.game.content.scenarios[this.game.s.scenario];
     const cards: { art: string; title: string; body: string }[] = [
-      { art: '🎢', title: 'Build a park people love', body: 'Visitors walk in, ride, eat, and tell each other what they thought. Their mood becomes your park rating, and your rating brings more of them. Your job is to keep that loop going without running out of cash.' },
-      { art: '🛤️', title: 'Paths come first', body: 'Everyone arrives at the gate and walks only on paths. A ride’s entrance, the small square, has to touch a path, or nobody can reach it. Queue tiles in front of a ride let more people wait in line.' },
-      { art: '🍦', title: 'Rides, food and prices', body: 'Rides bring excitement, and stalls fix hunger and thirst. Click anything you built to set its price or open and close it. Hire mechanics for breakdowns and handymen for litter. Fees and marketing are in Finance.' },
-      { art: '🏁', title: sc?.objective?.kind === 'sandbox' ? 'No goal, just build' : 'Your goal', body: `${sc ? goalLine(sc, rulesOf(this.game.s)) : ''} When you’re ready, you can build a coaster piece by piece, open the terminal with \` to type commands or ask the AI for a mod, and publish your park. Published parks are checked by replay and earn on NEAR testnet.` },
+      { art: 'coaster', title: 'Build a park people love', body: 'Visitors walk in, ride, eat, and tell each other what they thought. Their mood becomes your park rating, and your rating brings more of them. Your job is to keep that loop going without running out of cash.' },
+      { art: 'path', title: 'Paths come first', body: 'Everyone arrives at the gate and walks only on paths. A ride’s entrance, the small square, has to touch a path, or nobody can reach it. Queue tiles in front of a ride let more people wait in line.' },
+      { art: 'food', title: 'Rides, food and prices', body: 'Rides bring excitement, and stalls fix hunger and thirst. Click anything you built to set its price or open and close it. Hire mechanics for breakdowns and handymen for litter. Fees and marketing are in Finance.' },
+      { art: 'flag', title: sc?.objective?.kind === 'sandbox' ? 'No goal, just build' : 'Your goal', body: `${sc ? goalLine(sc, rulesOf(this.game.s)) : ''} When you’re ready, you can build a coaster piece by piece, open the terminal with \` to type commands or ask the AI for a mod, and publish your park. Published parks are checked by replay and earn on NEAR testnet.` },
     ];
     let i = 0;
     const panel = h('div', { class: 'ob-card' });
@@ -180,7 +185,7 @@ export class Onboarding {
       const c = cards[i];
       const last = i === cards.length - 1;
       panel.replaceChildren(
-        h('div', { class: 'ob-art', 'aria-hidden': 'true' }, c.art),
+        h('div', { class: `ob-art art-${i}`, 'aria-hidden': 'true' }, icon(c.art, 40)),
         h('h2', { id: 'ob-h' }, c.title),
         h('p', {}, c.body),
         h('div', { class: 'ob-dots', 'aria-label': `Card ${i + 1} of ${cards.length}` }, ...cards.map((_, k) => h('i', { class: k === i ? 'on' : '' }))),
@@ -229,7 +234,7 @@ export class Onboarding {
       const st = steps[i];
       st.enter?.();
       card.replaceChildren(
-        h('div', { class: 'ob-step' }, `Step ${i + 1} of ${steps.length}`),
+        h('div', { class: 'ob-step' }, `Step ${i + 1} of ${steps.length}`, h('span', { class: 'ob-progress', 'aria-hidden': 'true' }, h('i', { style: `width:${((i + 1) / steps.length) * 100}%` }))),
         h('h3', {}, st.title),
         h('p', {}, st.body),
         h('div', { class: 'ob-row' },
@@ -284,11 +289,11 @@ export class Onboarding {
     const keys: [string, string][] = [
       ['Click / drag', 'build with the chosen tool; drag paths and scenery'],
       ['R', 'rotate what you’re placing'], ['Q / E', 'turn the camera'], ['WASD / arrows', 'pan'], ['Wheel / pinch', 'zoom'],
-      ['Space', 'pause / resume'], ['M', 'sound on / off (or 🔊 next to the speeds)'], ['1 finger', 'tap to build or select; drag lays paths, or pans with Inspect'], ['2 fingers', 'pinch to zoom, drag to pan, twist to turn the view'], ['⟲ R ⟳', 'on touch screens: turn the view, rotate the piece; ❚❚ in the top bar pauses'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
+      ['Space', 'pause / resume'], ['M', 'sound on / off (or the speaker next to the speeds)'], ['1 finger', 'tap to build or select; drag lays paths, or pans with Inspect'], ['2 fingers', 'pinch to zoom, drag to pan, twist to turn the view'], ['⟲ R ⟳', 'on touch screens: turn the view, rotate the piece; pause is first in the speed buttons'], ['Esc', 'back to Inspect'], ['`', 'park terminal'], ['?', 'this sheet'],
     ];
     const sec = (title: string, ...kids: (Node | string)[]) => h('section', {}, h('h3', {}, title), ...kids);
     const panel = h('div', { class: 'ob-sheet' },
-      h('header', {}, h('h2', {}, 'How to play'), h('button', { class: 'x', 'aria-label': 'Close', onclick: () => done() }, '×')),
+      h('header', {}, h('h2', {}, 'How to play'), h('button', { class: 'x', 'aria-label': 'Close', onclick: () => done() }, icon('close', 20))),
       h('div', { class: 'ob-cols' },
         sec('Goal', h('p', {}, sc ? goalLine(sc, rulesOf(this.game.s)) : 'Build the best park you can.'), h('p', {}, 'Your rating (0–1000) comes from how happy visitors are, how good your rides are, how clean the park is, and whether it’s worth the money.')),
         sec('Building',
