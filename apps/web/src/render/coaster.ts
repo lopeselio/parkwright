@@ -7,6 +7,8 @@ import { mat } from './models.ts';
 const M = 1 / TILE_M;
 const GAUGE = 0.11;
 const CARS = 3;
+/** Train car colours, front to back. */
+export const CAR_COLOURS = ['#c0533a', '#f2b84b', '#5fb6e8'];
 const CAR_GAP = 0.32; // units between car centres along the track
 
 export interface CoasterView {
@@ -129,13 +131,12 @@ export function buildCoaster(ride: Ride, car?: (i: number) => THREE.Object3D | n
 
   // Train: cars follow the test-run speed profile.
   const cars: THREE.Group[] = [];
-  const carCols = ['#c0533a', '#f2b84b', '#5fb6e8'];
   for (let i = 0; i < CARS; i++) {
     const holder = new THREE.Group();
     const model = car?.(i);
     if (model) holder.add(model);
     else {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.26), mat(carCols[i % 3]));
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.26), mat(CAR_COLOURS[i % CAR_COLOURS.length]));
       body.position.y = 0.06;
       body.castShadow = true;
       holder.add(body);
