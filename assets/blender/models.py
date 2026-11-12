@@ -230,51 +230,99 @@ def teacups():
 
 
 def wheel():
-    # 3 wide (x) by 2 deep (y). Two A-frames hold the axle (along y); the wheel turns in the xz plane.
+    # 3 wide (x) by 2 deep (y). Two trussed A-frames hold the axle (along y); the wheel turns in the xz plane.
     box((2.8, 1.8, 0.1), (0, 0, 0.05), stone("concrete"))
-    box((0.9, 0.55, 0.12), (0, -0.4, 0.16), wood(), bevel=0.015)  # loading deck
-    box((0.5, 0.08, 0.08), (0, -0.71, 0.04), stone(), bevel=0.01)
-    line_fence((-0.45, -0.66), (-0.14, -0.66), 0.22, paint("white"), posts=3, h=0.15)
-    line_fence((0.14, -0.66), (0.45, -0.66), 0.22, paint("white"), posts=3, h=0.15)
+    box((2.7, 1.7, 0.03), (0, 0, 0.11), stone(), bevel=0.01)
+    # A raised boarding deck in front of the lowest car, with steps, rails and a little striped canopy.
+    box((0.9, 0.36, 0.5), (0, -0.4, 0.37), paint("cream"), bevel=0.015)
+    box((0.96, 0.4, 0.04), (0, -0.4, 0.64), wood(), bevel=0.01)
+    for i in range(4):
+        h = 0.62 * (4 - i) / 5
+        box((0.4, 0.09, h), (0, -0.62 - 0.09 * i, h / 2 + 0.1), stone(), bevel=0.01)
+    for x in (-0.46, 0.46):
+        line_fence((x, -0.58), (x, -0.22), 0.66, paint("white"), posts=3, h=0.15)
+    line_fence((-0.46, -0.58), (-0.22, -0.58), 0.66, paint("white"), posts=2, h=0.15)
+    line_fence((0.22, -0.58), (0.46, -0.58), 0.66, paint("white"), posts=2, h=0.15)
+    for x in (-0.44, 0.44):
+        rod((x, -0.56, 0.66), (x, -0.56, 1.0), 0.016, paint("white"), verts=6)
+    for i in range(6):
+        c = canvas("accent") if i % 2 == 0 else canvas("white")
+        box((0.16, 0.24, 0.016), (-0.4 + i * 0.16, -0.56, 1.02), c, rot=(-0.3, 0, 0), bevel=0.004)
+    valance(0.96, (0, -0.68, 0.97), 0.05, (canvas("accent"), canvas("white")), n=6)
+    # Ticket booth on the front left corner and lamps on the others.
+    box((0.28, 0.24, 0.36), (-1.15, -0.62, 0.29), paint("cream"), bevel=0.015)
+    box((0.18, 0.02, 0.12), (-1.15, -0.745, 0.33), bulb("glow", 1.0), bevel=0.004)
+    box((0.34, 0.3, 0.03), (-1.15, -0.62, 0.48), paint("accent"), bevel=0.01)
+    hip_roof(0.34, 0.3, 0.12, (-1.15, -0.62, 0.495), paint("accent"))
+    ball(0.02, (-1.15, -0.62, 0.63), brass(), seg=6, rings=4)
+    for x, y in ((1.25, -0.72), (1.25, 0.72), (-1.25, 0.72)):
+        lamp_post((x, y, 0.12), h=0.6, post=paint("navy"))
     frame = paint("white")
     for side in (-0.42, 0.42):
         for lean in (-1, 1):
-            box((0.08, 0.08, 2.46), (lean * 0.5, side, 1.17), frame, rot=(0, lean * 0.36, 0), bevel=0.02)
-            box((0.2, 0.2, 0.1), (lean * 0.92, side, 0.15), stone(), bevel=0.02)  # footing
-        for z, half in ((0.75, 0.66), (1.45, 0.4)):
+            # Each leg is a pair of tubes laced with braces: a lighter, truss-like silhouette.
+            for dy in (-0.05, 0.05):
+                rod((lean * 0.94, side + dy, 0.15), (lean * 0.06, side + dy, 2.2), 0.026, frame, verts=8)
+            for k in range(6):
+                t0, t1 = k / 6, (k + 1) / 6
+                p0 = (lean * (0.94 - 0.88 * t0), side - 0.05, 0.15 + 2.05 * t0)
+                p1 = (lean * (0.94 - 0.88 * t1), side + 0.05, 0.15 + 2.05 * t1)
+                rod(p0, p1, 0.01, frame, verts=4)
+            box((0.22, 0.22, 0.12), (lean * 0.94, side, 0.17), stone(), bevel=0.02)  # footing
+        for z, half in ((0.8, 0.6), (1.5, 0.3)):
             rod((-half, side, z), (half, side, z), 0.02, frame, verts=6)
-        rod((-0.66, side, 0.75), (0.4, side, 1.45), 0.014, frame, verts=6)
-        rod((0.66, side, 0.75), (-0.4, side, 1.45), 0.014, frame, verts=6)
-    cyl(0.05, 1.0, (0, 0, 2.2), chrome(), verts=12, rot=(math.pi / 2, 0, 0))
+        rod((-0.6, side, 0.8), (0.3, side, 1.5), 0.014, frame, verts=6)
+        rod((0.6, side, 0.8), (-0.3, side, 1.5), 0.014, frame, verts=6)
+        for z in (0.95, 1.3, 1.65, 1.95):
+            t = (z - 0.15) / 2.05
+            for lean in (-1, 1):
+                ball(0.02, (lean * (0.94 - 0.88 * t), side - 0.08, z), bulb(), seg=6, rings=3)
+    cyl(0.05, 1.04, (0, 0, 2.2), chrome(), verts=12, rot=(math.pi / 2, 0, 0))
     for side in (-0.47, 0.47):
-        cyl(0.09, 0.08, (0, side, 2.2), paint("blue"), verts=12, rot=(math.pi / 2, 0, 0))
+        cyl(0.1, 0.08, (0, side, 2.2), paint("accent"), verts=12, rot=(math.pi / 2, 0, 0))
     hub = empty("wheel", (0, 0, 2.2))
-    cyl(0.13, 0.32, (0, 0, 0), paint("blue"), hub, verts=16, rot=(math.pi / 2, 0, 0))
+    cyl(0.14, 0.32, (0, 0, 0), paint("accent"), hub, verts=16, rot=(math.pi / 2, 0, 0))
+    for side in (-0.17, 0.17):
+        cyl(0.2, 0.02, (0, side, 0), brass(), hub, verts=8, rot=(math.pi / 2, 0, 0))  # a star plate
     for side in (-0.13, 0.13):
-        torus(1.02, 0.028, (0, side, 0), paint("blue"), hub, rot=(math.pi / 2, 0, 0), seg=48)
-        torus(0.6, 0.016, (0, side, 0), paint("white"), hub, rot=(math.pi / 2, 0, 0), seg=32, minor_seg=4)
-        for x, z, a in ring(16, 1.0):
-            rod((0.1 * math.cos(a), side * 0.9, 0.1 * math.sin(a)), (x, side, z), 0.009, chrome(), hub, verts=4)
-        for x, z, a in ring(24, 1.06, offset=TAU / 48):
+        torus(1.02, 0.03, (0, side, 0), paint("accent"), hub, rot=(math.pi / 2, 0, 0), seg=48)
+        torus(0.82, 0.014, (0, side, 0), paint("white"), hub, rot=(math.pi / 2, 0, 0), seg=40, minor_seg=4)
+        torus(0.5, 0.014, (0, side, 0), paint("white"), hub, rot=(math.pi / 2, 0, 0), seg=32, minor_seg=4)
+        for x, z, a in ring(20, 1.0):
+            rod((0.12 * math.cos(a), side * 0.9, 0.12 * math.sin(a)), (x, side, z), 0.009, chrome(), hub, verts=4)
+        # A star of lacing between the rims, and bulbs on every other spoke and round the rim.
+        for k, (x, z, a) in enumerate(ring(20, 1.0)):
+            b = a + TAU / 20
+            rod((0.82 * math.cos(a), side, 0.82 * math.sin(a)), (1.02 * math.cos(b), side, 1.02 * math.sin(b)), 0.008, paint("white"), hub, verts=4)
+            if k % 2 == 0:
+                for rr in (0.4, 0.64):
+                    ball(0.018, (rr * math.cos(a), side * 1.08, rr * math.sin(a)), bulb("glow" if k % 4 else "lamp"), hub, seg=6, rings=3)
+        for x, z, a in ring(30, 1.065, offset=TAU / 60):
             ball(0.022, (x, side, z), bulb(), hub, seg=6, rings=3)
+    shirts = ["blue", "yellow", "green", "purple", "red", "orange", "teal"]
     for i in range(10):
         a = TAU * i / 10
         cx, cz = 1.02 * math.cos(a), 1.02 * math.sin(a)
-        rod((cx, -0.13, cz), (cx, 0.13, cz), 0.014, chrome(), hub, verts=6)
-        # Gondolas hang from their pins and stay level while the wheel turns (the loader counter-rotates hang*).
+        rod((cx, -0.15, cz), (cx, 0.15, cz), 0.014, chrome(), hub, verts=6)
+        # Gondolas hang from their pins and stay level while the wheel turns (the loader counter-rotates hang*):
+        # a rounded tub with a domed, scalloped roof on four posts, and riders looking out.
         g = empty(f"hang{i}", (cx, 0, cz), hub)
         c = paint(COLOURS[i % len(COLOURS)])
-        rod((0, 0, 0), (0, 0, -0.08), 0.012, chrome(), g)
-        cone(0.18, 0.06, (0, 0, -0.1), c, g, verts=4, rot=(0, 0, math.pi / 4))
-        for sx in (-0.09, 0.09):
+        rod((0, 0, 0), (0, 0, -0.07), 0.012, chrome(), g)
+        sphere(0.15, (0, 0, -0.1), c, g, subdiv=2, scale=(1.0, 0.85, 0.32))
+        ball(0.025, (0, 0, -0.04), chrome(), g, seg=6, rings=4)
+        for k, (x, y, _a) in enumerate(ring(10, 0.145)):
+            ball(0.022, (x, y * 0.85, -0.13), paint("cream"), g, seg=6, rings=3)
+        for sx in (-0.1, 0.1):
             for sy in (-0.08, 0.08):
                 rod((sx, sy, -0.12), (sx, sy, -0.24), 0.008, chrome(), g, verts=4)
-        box((0.24, 0.22, 0.1), (0, 0, -0.28), c, g, bevel=0.03, segments=2)
-        box((0.2, 0.05, 0.04), (0, 0.06, -0.22), wood(), g, bevel=0.01)
+        box((0.26, 0.22, 0.1), (0, 0, -0.29), c, g, bevel=0.04, segments=2)
+        box((0.27, 0.23, 0.02), (0, 0, -0.235), paint("cream"), g, bevel=0.008)
+        if i % 3 != 2:
+            for k, sx in enumerate((-0.055, 0.055)):
+                rider((sx, 0.02, -0.29), g, shirt="white", skin="cream", hair=None, legs=False, s=0.9)
     # Name board out front on two posts.
-    for x in (-0.42, 0.42):
-        rod((x, -0.78, 0.1), (x, -0.78, 0.6), 0.016, iron())
-    sign("SKY WHEEL", (0, -0.8, 0.6), 0.96, 0.17, paint("navy"), paint("yellow"))
+    ride_sign("SKY WHEEL", (0, -0.98, 0.5), 0.96, paint("navy"))
 
 
 def swings():
