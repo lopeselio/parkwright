@@ -46,6 +46,13 @@ if (shared) {
   onboarding.launch();
 }
 
+// Panels hang below the top bar, which wraps to two or three rows on narrower screens: track where it ends.
+const topBar = $('#top');
+const trackTop = () => document.documentElement.style.setProperty('--top-b', `${Math.ceil(topBar.getBoundingClientRect().bottom)}px`);
+new ResizeObserver(trackTop).observe(topBar);
+addEventListener('resize', trackTop);
+trackTop();
+
 // Camera buttons (shown on touch screens, where there are no Q/E/R keys).
 $('#cam').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cam]');
