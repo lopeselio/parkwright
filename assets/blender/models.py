@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
     band, bulb, bulbs, bunting, box, brass, ball, canvas, chrome, cone, cyl, empty, export, glass, iron, line_fence, mat,
     hip_roof, paint, prism, reset, ring, ring_fence, rod, sign, sphere, steps, stone, text, torus, valance, wood,
+    festoon, finial, lamp_post, rider, round_valance,
 )
 
 COLOURS = ["red", "yellow", "blue", "green", "purple", "pink"]
@@ -47,43 +48,120 @@ def flag(loc, colour, parent=None, h=0.22):
     box((0.1, 0.008, 0.06), (x + 0.05, y, z + h - 0.035), canvas(colour), parent, bevel=0)
 
 
+def ride_sign(body, loc, width, board, rot_z=0.0, posts=True, h=0.17):
+    """A ride's name board on two iron posts, lettered in a glowing cream so it lights up at dusk."""
+    x, y, z = loc
+    if posts:
+        c, s_ = math.cos(rot_z), math.sin(rot_z)
+        for d in (-width / 2 + 0.04, width / 2 - 0.04):
+            px, py = x + d * c, y + d * s_
+            rod((px, py, 0.02), (px, py, z), 0.016, iron())
+    sign(body, (x, y, z), width, h, board, bulb("lamp", 1.2), rot_z=rot_z)
+    for i in range(5):
+        t = (i + 0.5) / 5 - 0.5
+        ball(0.014, (x + t * width * math.cos(rot_z), y + t * width * math.sin(rot_z) - 0.035, z + h / 2 + 0.03), bulb(), seg=6, rings=3)
+
+
+def horse(parent, loc, a, hide, tack, z_up):
+    """A carousel horse on its pole, facing along the turn: arched neck, ears, a flowing mane and tail,
+    a painted saddle with a blanket and bent legs mid-gallop."""
+    h = empty("horsepivot", loc, parent)
+    h.rotation_euler = (0, 0, a)
+    box((0.11, 0.34, 0.14), (0, 0, 0), hide, h, bevel=0.04)  # barrel
+    box((0.085, 0.11, 0.2), (0, 0.16, 0.11), hide, h, rot=(-0.55, 0, 0), bevel=0.03)  # neck
+    box((0.075, 0.17, 0.08), (0, 0.25, 0.22), hide, h, rot=(0.4, 0, 0), bevel=0.03)  # head
+    for sx in (-0.022, 0.022):
+        cone(0.016, 0.05, (sx, 0.2, 0.29), hide, h, verts=4)  # ears
+    box((0.028, 0.16, 0.12), (0, 0.13, 0.2), tack, h, rot=(-0.5, 0, 0), bevel=0.012)  # mane
+    rod((0, -0.16, 0.03), (0, -0.25, -0.12), 0.022, tack, h, verts=6)  # tail
+    box((0.13, 0.12, 0.03), (0, -0.02, 0.085), brass(), h, bevel=0.01)  # saddle
+    box((0.135, 0.15, 0.06), (0, -0.02, 0.045), tack, h, bevel=0.012)  # blanket
+    for sx in (-0.035, 0.035):
+        rod((sx, 0.12, -0.04), (sx, 0.22, -0.13), 0.016, hide, h, verts=5)
+        rod((sx, 0.22, -0.13), (sx, 0.26, -0.21), 0.014, hide, h, verts=5)
+        rod((sx, -0.12, -0.04), (sx, -0.2, -0.13), 0.016, hide, h, verts=5)
+        rod((sx, -0.2, -0.13), (sx, -0.21, -0.22), 0.014, hide, h, verts=5)
+    return h
+
+
 def carousel():
     round_plinth(1.42)
-    ring_fence(1.38, 0.18, brass(), posts=22, h=0.15, gap=0.75)
+    # A painted skirt round the plinth, and lamps and a ticket box on the free corners of the 3x3.
+    band(1.425, 0.1, (0, 0, 0.065), (paint("red"), paint("cream")), verts=40)
+    torus(1.425, 0.014, (0, 0, 0.12), brass(), seg=40, minor_seg=4)
+    ring_fence(1.36, 0.18, brass(), posts=22, h=0.16, gap=0.75)
+    for x, y in ((-1.3, 1.3), (1.3, 1.3), (1.3, -1.3)):
+        lamp_post((x, y, 0), h=0.62, post=paint("navy"))
+    box((0.3, 0.26, 0.04), (-1.24, -1.24, 0.02), stone(), bevel=0.01)
+    box((0.24, 0.2, 0.34), (-1.24, -1.22, 0.21), paint("cream"), bevel=0.015)
+    box((0.16, 0.02, 0.12), (-1.24, -1.33, 0.27), paint("dark"), bevel=0.004)
+    box((0.3, 0.26, 0.03), (-1.24, -1.24, 0.39), paint("red"), bevel=0.01)
+    hip_roof(0.3, 0.26, 0.12, (-1.24, -1.24, 0.405), paint("red"))
+    ball(0.02, (-1.24, -1.24, 0.54), brass(), seg=6, rings=4)
+    ride_sign("CAROUSEL", (-1.24, -1.36, 0.47), 0.32, paint("navy"), posts=False, h=0.08)
+
     spin = empty("spin")
+    # The turning floor: boards with a brass edge and an inlaid ring.
     cyl(1.28, 0.05, (0, 0, 0.205), wood(), spin, verts=40)
     torus(1.28, 0.018, (0, 0, 0.23), brass(), spin, seg=40, minor_seg=4)
-    # Centre drum with mirrored panels, brass bands and the pole up through the roof.
+    torus(0.62, 0.01, (0, 0, 0.232), brass(), spin, seg=24, minor_seg=4)
+    # Centre drum: mirrored panels between brass bands, a band of bulbs round its crown.
     cyl(0.34, 1.3, (0, 0, 0.88), paint("cream"), spin, verts=16)
     band(0.35, 0.7, (0, 0, 0.9), (paint("red"), mat("glass", metallic=1.0, roughness=0.1, tag="mirror")), spin, verts=16)
     for z in (0.52, 1.27):
         torus(0.355, 0.022, (0, 0, z), brass(), spin, seg=16, minor_seg=4)
-    # Canopy: ceiling, striped valance ringed with bulbs, striped tent roof, finial and pennant.
+    bulbs(12, 0.36, 1.36, spin, offset=TAU / 24)
+    # Canopy: a ceiling with a sunburst of lit rays, a deep rounding board of gold and red panels, a
+    # scalloped fringe, bulbs top and bottom, then a two-stage striped roof (a flared skirt and a steep cap).
     cyl(1.5, 0.03, (0, 0, 1.53), paint("cream"), spin, verts=32, bevel=0)
-    band(1.52, 0.18, (0, 0, 1.62), (canvas("red"), canvas("cream")), spin, verts=24)
-    torus(1.52, 0.018, (0, 0, 1.71), brass(), spin, seg=32, minor_seg=4)
-    bulbs(24, 1.535, 1.6, spin, offset=TAU / 48)
-    cone(1.54, 0.62, (0, 0, 2.02), None, spin, verts=16, stripes=(canvas("red"), canvas("cream")))
-    cyl(0.05, 0.16, (0, 0, 2.37), brass(), spin, verts=8)
-    ball(0.07, (0, 0, 2.47), brass(), spin, seg=8, rings=6)
-    flag((0, 0, 2.5), "yellow", spin)
-    # Eight horses on brass poles, alternately raised.
-    for i, (x, y, a) in enumerate(ring(8, 1.0)):
+    for x, y, a in ring(12, 1.0):
+        rod((0.36 * math.cos(a), 0.36 * math.sin(a), 1.51), (1.42 * math.cos(a), 1.42 * math.sin(a), 1.51), 0.012, brass(), spin, verts=4)
+        for t in (0.62, 0.96, 1.3):
+            ball(0.018, (t * math.cos(a), t * math.sin(a), 1.49), bulb(), spin, seg=6, rings=3)
+    band(1.53, 0.26, (0, 0, 1.67), (paint("accent"), paint("red")), spin, verts=24)
+    for x, y, a in ring(24, 1.545):
+        o = ball(0.05, (x, y, 1.67), mat("glass", metallic=1.0, roughness=0.1, tag="mirror"), spin, seg=6, rings=4)
+        o.rotation_euler = (0, 0, a + math.pi / 2)
+        o.scale = (0.9, 0.2, 1.3)
+    torus(1.535, 0.02, (0, 0, 1.8), brass(), spin, seg=32, minor_seg=4)
+    torus(1.535, 0.02, (0, 0, 1.54), brass(), spin, seg=32, minor_seg=4)
+    round_valance(1.53, 1.5, 0.05, (canvas("cream"), canvas("red")), spin, n=32)
+    bulbs(24, 1.56, 1.6, spin, offset=TAU / 48)
+    bulbs(24, 1.56, 1.76, spin, offset=TAU / 48)
+    cone(1.58, 0.5, (0, 0, 2.06), None, spin, verts=24, stripes=(canvas("red"), canvas("cream")))
+    cyl(0.6, 0.14, (0, 0, 2.2), paint("cream"), spin, verts=24)
+    torus(0.6, 0.016, (0, 0, 2.27), brass(), spin, seg=24, minor_seg=4)
+    bulbs(12, 0.615, 2.2, spin)
+    cone(0.7, 0.62, (0, 0, 2.58), None, spin, verts=24, stripes=(canvas("red"), canvas("cream")))
+    finial((0, 0, 2.86), spin, h=0.3, flag_colour="yellow")
+    # Pennants round the roof's edge.
+    for x, y, a in ring(8, 1.2, offset=TAU / 16):
+        finial((x, y, 1.94), spin, h=0.2, flag_colour=COLOURS[int(round(a / TAU * 8)) % len(COLOURS)])
+    # Two rings of horses on brass poles, alternately raised, with riders on some; two chariots.
+    hides = ["white", "cream", "wood", "white", "darkwood"]
+    for i, (x, y, a) in enumerate(ring(8, 1.02)):
         rod((x, y, 0.23), (x, y, 1.53), 0.016, brass(), spin, verts=8)
+        ball(0.026, (x, y, 1.49), brass(), spin, seg=6, rings=4)
         z = 0.66 if i % 2 else 0.8
-        horse = empty(f"horse{i}", (x, y, z), spin)
-        horse.rotation_euler = (0, 0, a + math.pi / 2)
-        hide = paint(["white", "cream", "wood", "white"][i % 4])
-        tack = paint(COLOURS[i % len(COLOURS)])
-        box((0.11, 0.34, 0.15), (0, 0, 0), hide, horse, bevel=0.04, segments=2)
-        box((0.08, 0.1, 0.2), (0, 0.16, 0.11), hide, horse, rot=(-0.5, 0, 0), bevel=0.025)
-        box((0.075, 0.16, 0.075), (0, 0.24, 0.23), hide, horse, rot=(0.35, 0, 0), bevel=0.025)
-        box((0.025, 0.14, 0.1), (0, 0.13, 0.2), tack, horse, rot=(-0.5, 0, 0), bevel=0.01)  # mane
-        box((0.125, 0.11, 0.035), (0, -0.02, 0.085), tack, horse, bevel=0.012)  # saddle
-        for sx in (-0.035, 0.035):
-            rod((sx, 0.12, -0.04), (sx, 0.24, -0.19), 0.016, hide, horse)
-            rod((sx, -0.12, -0.04), (sx, -0.23, -0.17), 0.016, hide, horse)
-        rod((0, -0.17, 0.03), (0, -0.25, -0.1), 0.018, tack, horse)
+        horse(spin, (x, y, z), a, paint(hides[i % len(hides)]), paint(COLOURS[i % len(COLOURS)]), z)
+        if i % 3 != 1:
+            rider((x, y, z + 0.1), spin, rot_z=a + math.pi, shirt=COLOURS[(i + 2) % len(COLOURS)], skin=["cream", "terracotta", "wood"][i % 3])
+    for i, (x, y, a) in enumerate(ring(6, 0.66, offset=TAU / 12)):
+        if i % 3 == 0:
+            # A swan chariot: a bench with a curled neck at the front.
+            ch = empty("chariot", (x, y, 0.23), spin)
+            ch.rotation_euler = (0, 0, a)
+            box((0.16, 0.3, 0.12), (0, 0, 0.08), paint("white"), ch, bevel=0.04, segments=2)
+            box((0.16, 0.06, 0.2), (0, -0.13, 0.17), paint("white"), ch, bevel=0.025)
+            rod((0, 0.14, 0.12), (0, 0.2, 0.32), 0.03, paint("white"), ch, verts=6)
+            ball(0.04, (0, 0.18, 0.34), paint("white"), ch, seg=8, rings=5)
+            cone(0.02, 0.06, (0, 0.13, 0.34), paint("orange"), ch, verts=6, rot=(math.pi / 2, 0, 0))
+            box((0.17, 0.25, 0.025), (0, -0.02, 0.15), paint("gold"), ch, bevel=0.008)
+            rider((0, -0.04, 0.16), ch, rot_z=math.pi, shirt="pink", skin="terracotta", legs=False)
+            continue
+        rod((x, y, 0.23), (x, y, 1.53), 0.014, brass(), spin, verts=8)
+        z = 0.72 if i % 2 else 0.6
+        horse(spin, (x, y, z), a, paint(hides[(i + 2) % len(hides)]), paint(COLOURS[(i + 3) % len(COLOURS)]), z)
 
 
 def teacups():
