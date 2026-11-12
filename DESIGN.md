@@ -166,7 +166,7 @@ Errors are guided: a refusal says what would be valid ("no path at 12,8; nearest
 
 - **`pw`** is a resource/verb CLI shared by every interface: `pw park`, `pw map`, `pw ride list|build|price|open|close|inspect`, `pw coaster start|add|undo|test`, `pw shop`, `pw path`, `pw staff`, `pw finance`, `pw visitors thoughts`, `pw marketing`, `pw loan`. It is text-first, uses display names rather than ids, has guided errors, and offers `-o json`.
 - **In game:** an xterm.js panel (toggle with \`), with the same parser. `pw ask "<goal>"` hands the turn to the AI manager.
-- **AI manager:** a NEAR AI Cloud model in a TEE (attested), driven by a tool loop whose only tool is `pw`. It has a budget per day, set by the player. Every prompt and reply is signed, and you can check its proof bundle with `pnpm verify:manager`.
+- **AI manager:** a NEAR AI Cloud model in a TEE (attested), driven by a tool loop whose only tool is `pw`. It has a budget per day, set by the player. Every prompt and reply is signed. The browser checks each signature against the keys in the model's attestation report (`verifyProof`, `packages/ai/src/verify.ts`), and `ai proofs` downloads the bundle (exact request/response bytes plus signatures) so anyone can re-check it with the same function.
 - **Claude Code over MCP:** the server exposes MCP over Streamable HTTP at `/mcp/<code>` (stateless; tools `pw` and `park_overview`).
   - `bridge` in the game opens a WebSocket (`/ws/bridge`). The server pairs it with a 26-char base32 code (~128 bits, the only credential), valid while the tab is open.
   - Commands go MCP → relay → the tab, run there with `runCommand`, and the result comes back.
@@ -210,10 +210,10 @@ Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with
 - **Parks:** `register_park(park_id, name, owner?)` is admin-only, so nobody can front-run a park id or spam storage. The server registers each cloud park on its first publish, owned by the admin until a player claims it.
 - **Claiming:** a player claims a park through `assign_park(park_id, owner)`. It is admin-only, and works only while the admin still holds the park, so a claim is final and the server can never take a claimed park back. Afterwards only the owner can move it (`transfer_park`, 1 yocto). Before the server calls it (`apps/server/src/claim.ts`), the player must prove three things:
   1. they published the park: the park's secret key, which only the publishing browser holds;
-  2. they own the account: a NEP-413 signature over a one-time, 5-minute server challenge ("Claim Parkwright park <id>", recipient `parkwright`), made with a **full-access** key of that account (checked on chain via near-kit);
+  2. they own the account: a NEP-413 signature over a one-time, 5-minute server challenge ("Claim Parkwright park <id>", recipient `park.parkwright.testnet`), made with a **full-access** key of that account (checked on chain via near-kit);
   3. the park is verified by replay.
   Claimed parks keep settling, but only from verified, replayed spend. A park holds what visitors spend in escrow, and its owner calls `withdraw` to move it to their credit balance.
-- **Patrons** (agent visitors): `p0`–`p7.parkwright.testnet`, one per visitor group in the sim.
+- **Patrons** (agent visitors): `g0`–`g7.parkwright.testnet`, one per visitor group in the sim. (The first generation, `p0`–`p7`, is retired and deactivated on chain; see **Keys** below.)
   - Each patron's only key is a function-call key for `settle_day` on the contract. It has no full-access key, so it can't move NEAR or call anything else.
   - The admin sets each patron's `day_cap` (1,000 CR per park-day) and mints its budget (`fund_patrons`, 20,000 CR, topped up automatically below 5,000 CR).
 - **Settlement:** `settle_day(park_id, day, lines[{venue, amount}], state_hash)` is signed by the patron itself. The contract:
@@ -230,10 +230,13 @@ Contract `park.parkwright.testnet` (`contracts/park`, Rust, near-sdk 5.29), with
 - **Worker:** `apps/server/src/settle.ts`. After each cloud save, the park is marked dirty. One replica at a time (holding a Redis lock) settles its finished days: one `settle_day` per visitor group per day.
   - If a day's total is over the cap, the agent pays at most the cap, scaled evenly across venues.
   - "Already settled" counts as success.
+  - A park stays queued until every finished day has been sent: days still ahead of real time, or past a pass's 14-day limit, go out on a later pass without another save.
 - **Verified settlement:** a published save carries its complete action log (`fullLog`). Before any settlement, and before ranking, the server replays it in a worker thread from seed, scenario, mods and actions, and requires the exact same state hash (`apps/server/src/verify.ts`). This is cached per park version.
   - Inflated spend, dropped or reordered actions, and trimmed logs all fail.
   - Parks that load cost-changing mod rules partway through also fail, conservatively.
   - The caps stay as a second line of defence.
+  - A park with no cached result for its current version (never run, lost on a restart, or a transient failure that expired) is replayed again when anyone asks `GET /api/parks/<id>/verify`. Transient failures after a save are retried 3 times, 90 s apart.
+- **Independent check:** `pnpm verify <parkId> [host]` downloads the public save, replays it on your own machine with `@parkwright/sim`, and reads `get_park` over public RPC (not through the server). It then compares each day the contract still holds (`recent_days`, the last 8), the total `earned` and the settlement count with what the patron agents should have paid according to the replay.
 - **Keys:** settle_day burns ~3 Tgas (measured). The first patrons' keys have a lifetime allowance of 0.12 NEAR, roughly 400 settlements each. New patrons get keys with no allowance, limited by the account's own 0.3 NEAR. A function-call-only account can't be rekeyed, so the fix is new patron accounts plus `set_patron(old, active=false)`.
 - **Later:** contractor agents that bid to build coasters, paid from escrow.
 
