@@ -1,17 +1,108 @@
 # Parkwright
 
-An original theme-park builder in three.js. You build paths, flat rides, coasters and stalls, and simulated guests decide whether your park is worth their money. Guests are agents with NEAR testnet wallets and spending caps. The park manager can be you, typing in the in-game terminal, or an AI running on private (TEE) inference.
+An original theme-park builder in three.js. You lay paths, build flat rides, coasters and stalls, and simulated visitors decide whether your park is worth their money. The visitors are paid for by agents with their own NEAR testnet accounts and spending caps. You can manage the park yourself in the in-game terminal, or hand it to an AI that runs on private (TEE) inference.
 
-Work in progress. See DESIGN.md.
+Part of the **NEAR Arcade** submission for [NEAR HACKATHON](https://nearhackathon.com) ([repo](https://github.com/lopeselio/near-arcade), [arcade](https://arcade.lopeselio.online)). The author's other submission is **Signalfire** ([repo](https://github.com/lopeselio/signalfire)).
 
-## Play
+- **Play:** https://parkwright.lopeselio.online (testnet)
+- **Contract:** [`park.parkwright.testnet`](https://testnet.nearblocks.io/address/park.parkwright.testnet). Admin `parkwright.testnet`; visitor agents `g0`–`g7.parkwright.testnet`.
+- **Design:** [DESIGN.md](DESIGN.md) is the source of truth for the rules, the economy and the chain.
 
-- Hosted (testnet demo): https://parkwright.whitemeadow-d4da3d5d.northeurope.azurecontainerapps.io/
-- Local: `pnpm install`, then `pnpm --filter @parkwright/web dev` and open http://localhost:5180.
+## The problem
+
+Leaderboards and in-game economies usually ask you to trust the server: whoever runs the game decides what a park "earned". Parkwright makes the money in a park sim checkable:
+
+- The simulation is deterministic. A park is a seed, a scenario and a log of player actions, so anyone can replay it and get the same park, byte for byte.
+- Visitor spending is settled on NEAR by agents whose keys can do nothing except pay into parks, within caps the contract enforces.
+- Anyone can replay a published park on their own machine and compare it with what the contract recorded: `pnpm verify <parkId>`.
+
+## Tracks
+
+| Track | Evidence |
+|---|---|
+| **Games** | A full park builder: paths, queues, 6 flat rides, a piece-by-piece coaster with a physics test run, stalls, staff, finance, ratings, visitors with needs and opinions, day/night, sound, touch controls and a guided walkthrough. Deterministic sim with versioned rules (`packages/sim`, DESIGN §6.1). |
+| **Privacy** | The AI manager and AI mods run on a TEE-attested model on NEAR AI Cloud, so your park's books go only to attested hardware. Your browser checks every reply's TEE signature against the model's attestation report, and `ai proofs` exports the signed bytes. On chain, only per-day venue totals are recorded, never a per-visitor trail. |
+| **Agents** | 8 patron agents (`g0`–`g7`), one per visitor group, each with a single function-call key that can only call `settle_day`, under a 1,000 CR per-day cap and a 5,000 CR per-park-day cap. Two more players: the AI park manager, which may only build and look, within a budget, and Claude Code over MCP (`bridge`). |
+| **Open** | MIT. Mods are data-only packs, validated and clamped, that ship inside every save. `pnpm verify` replays any public park locally and checks it against the chain over public RPC. `pw` is a CLI that every interface shares (you, the AI, MCP). |
+
+## What the chain proves, and what it doesn't
+
+**Proves** (enforced by `park.parkwright.testnet`):
+- every settlement was signed by a patron agent's own key, and that key can call nothing but `settle_day`;
+- no patron pays more than 1,000 CR for a park-day, no park takes more than 5,000 CR a day, a day is paid at most once per patron, and days can't run ahead of real time (20 s per park-day);
+- minting is capped at 200,000 CR per 24 h, and credits in accounts plus escrow always equal the total supply;
+- once claimed, a park belongs to its owner: only they can withdraw its escrow or transfer it, and the server can never take it back.
+
+**Does not prove:**
+- **that the spend came from an honest replay.** The game server replays each save and settles only verified parks, from the replayed numbers, but the contract doesn't re-run the sim. `state_hash` is recorded, not checked. Anyone can re-check a park with `pnpm verify`, which is the point of publishing the full action log.
+- **that the patrons are independent.** Their keys belong to the game (the server signs for them). The contract only bounds what they can do.
+- **ownership of an unclaimed park.** Until a player claims it, a park is held by `parkwright.testnet`.
+- **value.** CR are testnet play credits.
+
+## Try it (hosted)
+
+```sh
+URL=https://parkwright.lopeselio.online
+```
+
+- Do: open $URL. See: the title screen. A fresh browser shows **Play** (with the starting park's name, Meadowbrook), **New park** and **How to play**. Once you've played, **Play** becomes **Continue** with your park's day.
+- Do: **New park**. See: Meadow Start ("starts with 15,000 cr + 10,000 cr loan", so the HUD shows 25,000 cr) and Sandbox.
+- Do: `curl -s $URL/api/leaderboard`. See: the verified parks, ranked by the rating the server's replay produced, including the showcase parks below.
+- Do: `pnpm install && pnpm verify f54720d4972a7f34`. See: the save downloaded from $URL, replayed locally ("replay MATCH"), `get_park` read straight from testnet RPC, and a per-day table of what the replay says the agents should have paid next to what the contract recorded, ending in `VERIFIED` (exit 0). If you catch a park while its agents are still paying a day, that day shows as "settling" and the totals as "ok so far". Output from 2026-11-12:
+
+```
+$ pnpm verify f54720d4972a7f34
+Parkwright park f54720d4972a7f34
+  host      https://parkwright.lopeselio.online
+  contract  park.parkwright.testnet (testnet)
+
+save      "Brass Meadow", version 1, rules v2, scenario meadow, seed 3
+          106 actions, tick 37820 (day 22), 27 venues, 1257 visitors, sha256 0db0a8cae17d6a52…
+
+replay    MATCH: replay matches the save (675 ms, locally with @parkwright/sim)
+          replayed rating 5.80, 1257 visitors, 21 finished days
+          the host says: verified true (replay matches the save)
+
+chain     get_park via https://testnet-rpc.intea.rs
+          owner parkwright.testnet (unclaimed: the game server holds it until a player claims it), escrow 41,956.60 CR, earned 41,956.60 CR, 168 settlements
+
+  day   replay says      on chain
+   14    2,458.90 CR    2,458.90 CR  ok
+   15    2,544.40 CR    2,544.40 CR  ok
+   16    2,705.20 CR    2,705.20 CR  ok
+   17    2,732.80 CR    2,732.80 CR  ok
+   18    2,845.60 CR    2,845.60 CR  ok
+   19    2,784.60 CR    2,784.60 CR  ok
+   20    2,619.80 CR    2,619.80 CR  ok
+   21    2,785.70 CR    2,785.70 CR  ok
+
+  earned       replay 41,956.60 CR, chain 41,956.60 CR  ok
+  settlements  replay 168, chain 168  ok  (one settle_day per visitor group per day)
+
+VERIFIED: the save replays exactly and every settled day matches the replay
+  contract  https://testnet.nearblocks.io/address/park.parkwright.testnet
+```
+
+- Do: `curl -s $URL/api/parks/f54720d4972a7f34/verify` and `curl -s $URL/api/parks/f54720d4972a7f34/chain`. See: the server's own verdict (`"verified": true`), then the park's escrow, earnings, settlement count and recent days, read from the contract.
+
+**Showcase parks.** Each was built only with `pw` commands (the reference park builders in `packages/sim/scripts/parks.ts`), published through the public API like the browser does, then verified by replay and settled by the agents. Open any of them with `$URL/?park=<id>`; you get your own copy to play.
+
+| Park | id | What's in it | Settled on chain |
+|---|---|---|---|
+| Brass Meadow | `f54720d4972a7f34` | Meadow, 21 days: 27 venues, 1,257 visitors, rating 5.80 | 41,956.60 CR in 168 settlements |
+| Lantern Hollow | `54a722918895cef9` | Sandbox, 10 days: 30 venues, 1,719 visitors, rating 6.96 | 16,669.60 CR in 80 settlements |
+| Marigold Midway | `0c4b02cc0ff3e4c4` | Meadow, 14 days: 27 venues, 939 visitors, rating 5.48 | 23,118.60 CR in 112 settlements |
+| Judge Park | `5646276b0bfcba1a` | Meadow, built by hand in the hosted game during a judge rehearsal | 394.20 CR in 53 settlements |
+
+**Claim on NEAR** (wallet): a claim transaction will be cited here after the owner's wallet pass: _pending_.
+
+## Play locally
+
+- `pnpm install`, then `pnpm --filter @parkwright/web dev` and open http://localhost:5180.
 
 ## First run
 
-- Do: open the game. See: a title screen with **Continue**, **New park** (pick Meadow or Sandbox and name your park) and **How to play**.
+- Do: open the game. See: a title screen with **Play** (your park's name; **Continue** once you've played), **New park** (pick Meadow or Sandbox and name your park) and **How to play**.
 - Do: start a park. See: a four-card welcome (Next/Back/Skip, arrow keys, Esc). Then **Show me how** starts a hands-on walkthrough that highlights each control and waits for you: pick Path, drag a path from the gate, open Rides, place a ride, place a stall, inspect it, speed up time. **End tour** stops it at any point.
 - Do: press `?` or the **?** button in the top bar. See: the rules and controls sheet, with buttons to replay the welcome, restart the walkthrough or start a new park. Add `?play` to the URL to skip the title screen.
 - Do: look at the top bar and toolbar. See: one set of line icons (no emoji): the park name, Cash, Rating and Visitors pills, pause and speed buttons with the speaker, then Finance, Visitors, Staff, Parks, the terminal and help. Panels slide in; on a phone the top bar is three rows (name and speeds, stats, menu) and the toolbar is a bottom bar.
@@ -46,7 +137,8 @@ Visitors arrive in 8 groups. Each group is paid for by an agent with its own NEA
 - Do: open the game, build a ride, press **Parks → Publish & share**, and let two in-game days pass. See: the Parks panel shows "On NEAR testnet" with the credits settled into your park, and a link to the contract on NearBlocks.
 - Do (owner, once): `./scripts/set-insights-secret.sh`. See: an Application Insights resource `parkwright-insights` on the app's Log Analytics workspace; after the restart, *Live metrics*, *Failures* and *Performance* in the portal show the server's requests, Redis/Cosmos/NEAR calls and exceptions (25% of requests sampled; `INSIGHTS_SAMPLING` changes it).
 - Do (owner, once): `./scripts/backup-policy.sh`. See: Cosmos DB keeps a geo-redundant backup every 4 hours for 7 days (`backupRetentionIntervalInHours: 168`) instead of 8 hours.
-- Do: `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard.
+- Do (with `URL=https://parkwright.lopeselio.online`): `curl $URL/api/parks/<id>/verify`. See: whether the server's replay of every action reproduced the save exactly. Only verified parks settle on NEAR or appear on the leaderboard. A park with no result yet is replayed when you ask (a long one says "pending" for a few seconds). A park that is on chain but whose save was published to another server gets a 404 that says so (`"onchain": true`).
+- Do: `pnpm verify <id> [host]`. See: the same replay run on your machine, plus each settled day compared with `get_park` read over public testnet RPC (falls back from intea to dRPC to FastNEAR and backs off on 429s; `NEAR_RPC=` to choose one). Exits 0 when it all matches.
 - Do: `curl $URL/api/parks/<id>/chain`. See: the park's escrow, earnings and settlement count, read from the contract, plus `claimed`.
 - Do: publish a park, keep playing until the Parks panel shows **✓ Verified**, then press **Claim on NEAR** and pick a testnet wallet in the NEAR Connect picker (e.g. Meteor or HOT). See: the wallet asks you to sign "Claim Parkwright park <id>" (a message, not a transaction, so no gas), then the panel shows you as **Owner**, and `/chain` reports `"claimed": true`. Once it has earned something, **Withdraw earnings** asks your wallet to sign a `withdraw` call (1 yoctoNEAR), and the escrow moves to your CR balance (`ft_balance_of`).
 - Do: `cd contracts/park && cargo test`. See: 18 tests covering caps, replays, withdrawals, transfers and credit conservation.
