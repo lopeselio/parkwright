@@ -136,7 +136,7 @@ export class Onboarding {
         const b = h('button', { class: `ob-scen${sc.id === pick ? ' on' : ''}`, 'aria-pressed': String(sc.id === pick), onclick: () => {
           pick = sc.id;
           for (const c of cards) { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', String(c === b)); }
-        } }, h('b', {}, sc.name), h('small', {}, goalLine(sc)), h('span', { class: 'ob-cash' }, `${sc.size[0]}×${sc.size[1]} · starts with ${(sc.cash / 100).toLocaleString()} cr`));
+        } }, h('b', {}, sc.name), h('small', {}, goalLine(sc)), h('span', { class: 'ob-cash' }, `${sc.size[0]}×${sc.size[1]} · starts with ${(sc.cash / 100).toLocaleString()} cr${sc.loan ? ` + ${(sc.loan / 100).toLocaleString()} cr loan` : ''}`));
         return b;
       });
       const start = () => {
