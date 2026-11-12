@@ -127,3 +127,35 @@ describe('review: forgery and queue', () => {
     expect((await v.latest('parkxyz'))?.version).toBe(2);
   }, 30_000);
 });
+
+describe('GET /verify never leaves a park pending forever', () => {
+  let base = '';
+  let server: ReturnType<typeof createApp>;
+  let dir = '';
+  let store: FileStore;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'pw-verify-get-'));
+    const cache = new MemoryCache();
+    store = new FileStore(dir);
+    const chainPark = async (id: string) => (id === 'onchainonly01' ? { owner: 'parkwright.testnet', name: 'Test' } : null);
+    server = createApp({ store, cache, docs: new Layered(cache), verifier: new Verifier(cache), chainPark }, { webDist: dir, version: 't' });
+    await new Promise<void>((r) => server.listen(0, r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => { server.close(); await rm(dir, { recursive: true, force: true }); });
+
+  it('a stored park that was never verified (e.g. saved before a restart) is replayed on request', async () => {
+    const { save, p } = played(1, 41);
+    // Written straight to the store: no afterSave ran, so nothing is cached for it.
+    await store.create({ id: 'neververified1', name: 'Old', ownerHash: 'x', rating: 0, value: 0, visitors: 0, day: p.s.day, scenario: 'meadow', save, createdAt: 0, updatedAt: 0, version: 1 });
+    const v = (await (await fetch(`${base}/api/parks/neververified1/verify`)).json()) as any;
+    expect(v).toMatchObject({ verified: true, reason: 'replay matches the save' });
+  }, 30_000);
+
+  it('a park that is only on chain says so instead of a bare "no such park"', async () => {
+    const r = await fetch(`${base}/api/parks/onchainonly01/verify`);
+    expect(r.status).toBe(404);
+    expect(await r.json()).toMatchObject({ onchain: true });
+    expect(await (await fetch(`${base}/api/parks/missingpark01/verify`)).json()).toEqual({ error: 'no such park' });
+  });
+});
