@@ -107,10 +107,13 @@ export class Settler {
     // Same bound as the contract: days can't run ahead of real time since the park was created.
     const maxDay = Math.floor((this.now() - doc.createdAt) / GAME_DAY_MIN_MS) + DAY_SLACK;
     const seen = new Set<number>();
-    const days = (replayedHistory ?? (Array.isArray(s.history) ? s.history : []))
-      .filter((d) => Number.isInteger(d?.day) && d.day > through && d.day < s.day && d.day <= maxDay && !seen.has(d.day) && seen.add(d.day))
-      .sort((a, b) => a.day - b.day)
-      .slice(0, MAX_DAYS_PER_PASS);
+    const due = (replayedHistory ?? (Array.isArray(s.history) ? s.history : []))
+      .filter((d) => Number.isInteger(d?.day) && d.day > through && d.day < s.day && !seen.has(d.day) && seen.add(d.day))
+      .sort((a, b) => a.day - b.day);
+    const ready = due.filter((d) => d.day <= maxDay);
+    const days = ready.slice(0, MAX_DAYS_PER_PASS);
+    // Days still ahead of real time, or past this pass's limit, settle on a later pass: keep the park dirty.
+    const later = due.length > days.length;
     let n = 0;
     for (const d of days) {
       if (this.now() > deadline) return { settled: n, complete: false };
@@ -137,7 +140,7 @@ export class Settler {
       }
       await this.cache.set(doneKey(parkId), String(d.day), 60 * 60 * 24 * 30);
     }
-    return { settled: n, complete: true };
+    return { settled: n, complete: !later };
   }
 
   /** Top up patrons running low. Runs on its own schedule; the contract limits minting per day. */
