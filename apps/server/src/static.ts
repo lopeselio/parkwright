@@ -17,7 +17,7 @@ const TYPES: Record<string, string> = {
   '.map': 'application/json',
   '.woff2': 'font/woff2',
 };
-const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.map']);
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.map', '.glb']);
 
 /** Path under root, or null if the request tries to escape it. */
 export function resolveSafe(root: string, urlPath: string): string | null {
