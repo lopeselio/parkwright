@@ -18,6 +18,11 @@ const BOARD = 'board:rating';
 const boardOf = (d: { modded?: boolean }) => (d.modded ? `${BOARD}:modded` : BOARD);
 const baseOnly = buildContent([basePack]);
 const CHAIN_CONTRACT = process.env.PARK_CONTRACT_ID ?? 'park.parkwright.testnet';
+/** How long GET /verify waits for a replay it had to start before answering "pending". */
+const VERIFY_WAIT_MS = 8_000;
+/** A transient verification result (timeout, busy queue, crash) is retried this often after a save. */
+const VERIFY_RETRIES = 3;
+const VERIFY_RETRY_MS = 90_000;
 
 export interface Deps {
   store: Store;
@@ -34,7 +39,7 @@ export interface Deps {
 }
 
 /** After a save lands: verify it by replay, then (only if it matches) rank it — by the REPLAYED numbers — and queue it for settlement. */
-function afterSave(deps: Deps, doc: ParkDoc) {
+function afterSave(deps: Deps, doc: ParkDoc, attempt = 0) {
   const { verifier, cache, settler } = deps;
   if (!verifier) {
     // Verification off (tests, tools): rank and settle as before.
@@ -43,6 +48,14 @@ function afterSave(deps: Deps, doc: ParkDoc) {
     return;
   }
   void verifier.verify(doc.id, doc.version, doc.save).then(async (r) => {
+    if (r.transient && attempt < VERIFY_RETRIES) {
+      // Said nothing about the save (timeout, busy, crash): try again later instead of leaving it pending.
+      setTimeout(() => {
+        // A newer save has its own verification; only retry the version that is still current.
+        void deps.store.get(doc.id).then((cur) => { if (cur?.version === doc.version) afterSave(deps, doc, attempt + 1); }).catch(() => {});
+      }, VERIFY_RETRY_MS).unref();
+      return;
+    }
     if (!r.ok || !r.replayed) return; // the last verified version (if any) keeps its place
     const ranked = { ...doc, rating: r.replayed.rating, value: r.replayed.value };
     await cache.zrem(boardOf({ modded: !doc.modded }), doc.id).catch(() => {});
@@ -158,9 +171,21 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     const id = verifyMatch[1];
     if (!validId(id)) { json(res, 400, { error: 'bad park id' }); return true; }
     const d = await store.get(id);
-    if (!d) { json(res, 404, { error: 'no such park' }); return true; }
-    const r = deps.verifier ? await deps.verifier.status(id, d.version) : null;
-    json(res, 200, { id, version: d.version, verified: r?.ok ?? false, reason: r?.reason ?? (deps.verifier ? 'verification pending' : 'verification is off'), ms: r?.ms ?? null });
+    if (!d) {
+      // A park can be registered on chain without a save here (e.g. one published to a local or test server).
+      const onchain = deps.chainPark ? await deps.chainPark(id).catch(() => null) : null;
+      json(res, 404, onchain ? { error: 'no save for this park on this server: it is registered on chain, but its save was published elsewhere (a local or test server), so it cannot be replayed here', onchain: true } : { error: 'no such park' });
+      return true;
+    }
+    let r = deps.verifier ? await deps.verifier.status(id, d.version) : null;
+    if (deps.verifier && !r) {
+      // Nothing cached for this version (never run, a restart lost it, or a transient result expired): run it now.
+      // Most parks replay in well under a second; a long one answers "pending" and the result lands in the cache.
+      const job = deps.verifier.verify(id, d.version, d.save);
+      r = await Promise.race([job, new Promise<null>((ok) => setTimeout(() => ok(null), VERIFY_WAIT_MS).unref())]);
+      if (r?.transient) r = null;
+    }
+    json(res, 200, { id, version: d.version, verified: r?.ok ?? false, reason: r?.reason ?? (deps.verifier ? 'verification pending: the replay is queued, ask again in a few seconds' : 'verification is off'), ms: r?.ms ?? null });
     return true;
   }
 
