@@ -9,6 +9,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "verify": "node --experimental-transform-types --disable-warning=ExperimentalWarning apps/server/scripts/verify-park.ts",
     "check:gas": "node --experimental-transform-types --disable-warning=ExperimentalWarning packages/chain/src/check-gas.ts",
     "e2e": "pnpm --filter @parkwright/web build && pnpm --filter @parkwright/e2e e2e"
   },
