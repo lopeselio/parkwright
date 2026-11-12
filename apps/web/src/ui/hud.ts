@@ -137,7 +137,7 @@ export class Hud {
         h('b', {}, r.name),
         h('small', {}, `${cr(r.cost)} · ${r.size[0]}×${r.size[1]}${r.kind === 'flat' ? ` · E ${(r.ratings.e / 100).toFixed(1)} I ${(r.ratings.i / 100).toFixed(1)}` : r.item ? ` · ${c.items[r.item].name}` : ''}`),
       )),
-      h('p', { class: 'tip' }, 'R rotates the entrance. The entrance (small square) must touch a path — add queue tiles in front so more visitors can wait.'),
+      h('p', { class: 'tip' }, `${matchMedia('(pointer: coarse)').matches ? 'The R button rotates' : 'R rotates'} the entrance. The entrance (small square) must touch a path — add queue tiles in front so more visitors can wait.`),
     );
   }
 
