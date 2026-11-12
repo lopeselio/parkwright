@@ -116,7 +116,7 @@ export class AiTerminal {
     }
     const checks = verifyProof(p, this.signers ?? []);
     const ok = checks.every((c) => c.ok);
-    return ok ? `${C.dim}🔏 signed in a TEE by ${p.signature!.signing_address.slice(0, 10)}… — verified here (${checks.length} checks)${C.off}` : `${C.err}⚠ proof check failed: ${checks.filter((c) => !c.ok).map((c) => c.label).join('; ')}${C.off}`;
+    return ok ? `${C.dim}✓ signed in a TEE by ${p.signature!.signing_address.slice(0, 10)}… — verified here (${checks.length} checks)${C.off}` : `${C.err}⚠ proof check failed: ${checks.filter((c) => !c.ok).map((c) => c.label).join('; ')}${C.off}`;
   }
 
   private parkState(): string {
