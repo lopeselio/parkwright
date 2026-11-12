@@ -166,4 +166,17 @@ describe('settlement worker', () => {
     const days = [...chain.settled].map((k) => Number(k.split('|')[2]));
     expect(Math.max(...days)).toBeLessThanOrEqual(2);
   });
+
+  it('a day not yet due stays queued and settles on a later pass without another save', async () => {
+    const created = 1_800_000_000_000;
+    const { store, park } = await parkWithDays(4, created);
+    const chain = fakeChain();
+    let now = created + 10_000; // floor(10 / 20) + 2 slack: days 0-2 now, day 3 later
+    const s = new Settler(chain.api, store, new MemoryCache(), () => now);
+    expect(await s.settlePark('chainpark1')).toMatchObject({ complete: false });
+    expect(Math.max(...[...chain.settled].map((k) => Number(k.split('|')[2])))).toBe(2);
+    now = created + 30_000;
+    expect(await s.settlePark('chainpark1')).toMatchObject({ complete: true });
+    expect(new Set([...chain.settled].map((k) => Number(k.split('|')[2])))).toEqual(new Set([0, 1, 2, 3].filter((d) => d < park.s.day)));
+  });
 });
