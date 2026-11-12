@@ -327,23 +327,57 @@ def wheel():
 
 def swings():
     round_plinth(1.38)
+    band(1.385, 0.1, (0, 0, 0.065), (paint("accent"), paint("cream")), verts=40)
+    torus(1.385, 0.014, (0, 0, 0.12), brass(), seg=40, minor_seg=4)
     ring_fence(1.34, 0.18, paint("white"), posts=22, h=0.15, gap=0.75)
-    cyl(0.34, 0.32, (0, 0, 0.34), paint("green"), verts=16)
-    torus(0.34, 0.02, (0, 0, 0.5), brass(), seg=16, minor_seg=4)
-    cyl(0.17, 2.3, (0, 0, 1.6), paint("cream"), verts=16, r2=0.12)
-    for z in (0.9, 1.4, 1.9, 2.3):
-        torus(0.16 - (z - 0.5) * 0.02, 0.02, (0, 0, z), paint("green"), seg=16, minor_seg=4)
+    # An operator's booth on one corner, lamps on the others.
+    box((0.26, 0.26, 0.04), (1.22, -1.22, 0.02), stone(), bevel=0.01)
+    box((0.22, 0.22, 0.3), (1.22, -1.22, 0.19), paint("cream"), bevel=0.015)
+    box((0.14, 0.02, 0.1), (1.22, -1.335, 0.24), bulb("glow", 1.0), bevel=0.004)
+    box((0.3, 0.3, 0.03), (1.22, -1.22, 0.355), paint("accent"), bevel=0.01)
+    hip_roof(0.3, 0.3, 0.12, (1.22, -1.22, 0.37), paint("accent"))
+    for x, y in ((-1.3, 1.3), (1.3, 1.3), (-1.3, -1.3)):
+        lamp_post((x, y, 0), h=0.62, post=paint("navy"))
+    # The tower: a fluted base drum, a lattice of four tubes laced with braces, lights running up it.
+    cyl(0.36, 0.34, (0, 0, 0.35), paint("accent"), verts=16)
+    band(0.365, 0.22, (0, 0, 0.35), (paint("accent"), paint("cream")), verts=16)
+    torus(0.36, 0.02, (0, 0, 0.52), brass(), seg=16, minor_seg=4)
+    cyl(0.1, 2.3, (0, 0, 1.65), paint("cream"), verts=12)
+    corners = [(0.17 * math.cos(a), 0.17 * math.sin(a)) for _x, _y, a in ring(4, 1.0, offset=TAU / 8)]
+    for k, (x, y) in enumerate(corners):
+        rod((x, y, 0.52), (x * 0.7, y * 0.7, 2.6), 0.018, paint("white"), verts=6)
+        nx, ny = corners[(k + 1) % 4]
+        for j in range(6):
+            z0, z1 = 0.6 + j * 0.33, 0.6 + (j + 1) * 0.33
+            f0, f1 = 1 - (z0 - 0.52) / 2.08 * 0.3, 1 - (z1 - 0.52) / 2.08 * 0.3
+            a0, a1 = (x * f0, y * f0, z0), (nx * f1, ny * f1, z1)
+            if j % 2:
+                a0, a1 = (nx * f0, ny * f0, z0), (x * f1, y * f1, z1)
+            rod(a0, a1, 0.008, paint("white"), verts=4)
+        for j in range(7):
+            z = 0.75 + j * 0.28
+            f = 1 - (z - 0.52) / 2.08 * 0.3
+            ball(0.02, (x * f * 1.12, y * f * 1.12, z), bulb("glow" if j % 2 else "lamp"), seg=6, rings=3)
     spin = empty("spin", (0, 0, 2.6))
+    # The turning top: a ceiling, a rounding board with a scalloped fringe and two rows of bulbs, a flared
+    # striped roof with a cupola, and pennants round the edge.
     cyl(1.16, 0.02, (0, 0, -0.28), paint("cream"), spin, verts=32, bevel=0)
-    band(1.18, 0.16, (0, 0, -0.2), (canvas("yellow"), canvas("cream")), spin, verts=24)
-    torus(1.18, 0.016, (0, 0, -0.12), brass(), spin, seg=32, minor_seg=4)
-    bulbs(24, 1.195, -0.21, spin, offset=TAU / 48)
-    cone(1.2, 0.48, (0, 0, 0.12), None, spin, verts=16, stripes=(canvas("green"), canvas("cream")))
-    cyl(0.04, 0.14, (0, 0, 0.42), brass(), spin, verts=8)
-    ball(0.06, (0, 0, 0.5), brass(), spin, seg=8, rings=6)
-    flag((0, 0, 0.53), "red", spin)
+    band(1.18, 0.2, (0, 0, -0.18), (paint("accent"), paint("cream")), spin, verts=24)
+    torus(1.18, 0.018, (0, 0, -0.08), brass(), spin, seg=32, minor_seg=4)
+    torus(1.18, 0.018, (0, 0, -0.28), brass(), spin, seg=32, minor_seg=4)
+    round_valance(1.18, -0.31, 0.04, (canvas("cream"), canvas("accent")), spin, n=24)
+    bulbs(24, 1.2, -0.13, spin, offset=TAU / 48)
+    bulbs(24, 1.2, -0.23, spin)
+    cone(1.22, 0.42, (0, 0, 0.13), None, spin, verts=24, stripes=(canvas("accent"), canvas("cream")))
+    cyl(0.4, 0.12, (0, 0, 0.36), paint("cream"), spin, verts=16)
+    bulbs(10, 0.41, 0.36, spin)
+    cone(0.48, 0.44, (0, 0, 0.64), None, spin, verts=16, stripes=(canvas("accent"), canvas("cream")))
+    finial((0, 0, 0.84), spin, h=0.3, flag_colour="red")
+    for x, y, a in ring(6, 0.95, offset=TAU / 12):
+        finial((x, y, 0.0), spin, h=0.2, flag_colour=COLOURS[int(round(a / TAU * 6)) % len(COLOURS)])
+    shirts = ["blue", "yellow", "green", "purple", "red", "orange", "teal"]
     for i, (x, y, a) in enumerate(ring(12, 0.9)):
-        # Seats hang flung outward (the ride is shown running).
+        # Chairs hang flung outward (the ride is shown running), each with a footrest and a bar.
         arm = empty(f"arm{i}", (x, y, -0.28), spin)
         arm.rotation_euler = (0, 0, a)
         chain = empty(f"chain{i}", (0, 0, 0), arm)
@@ -352,8 +386,12 @@ def swings():
             rod((0, sy, 0), (0, sy, -1.0), 0.006, chrome(), chain, verts=4)
         c = paint(COLOURS[i % len(COLOURS)])
         box((0.15, 0.14, 0.035), (0, 0, -1.02), c, chain, bevel=0.012)
-        box((0.03, 0.14, 0.15), (-0.07, 0, -0.95), c, chain, bevel=0.012)
-        rod((0.07, -0.055, -0.97), (0.07, 0.055, -0.97), 0.008, chrome(), chain, verts=4)
+        box((0.03, 0.14, 0.17), (-0.07, 0, -0.94), c, chain, bevel=0.012)
+        box((0.05, 0.12, 0.012), (0.12, 0, -1.1), chrome(), chain, bevel=0)
+        rod((0.07, -0.055, -0.95), (0.07, 0.055, -0.95), 0.008, chrome(), chain, verts=4)
+        if i % 4 != 3:
+            rider((0, 0, -1.0), chain, rot_z=math.pi / 2, shirt=shirts[i % len(shirts)],
+                  skin=["cream", "terracotta", "wood"][i % 3], arms_up=i % 3 == 0)
 
 
 def droptower():
