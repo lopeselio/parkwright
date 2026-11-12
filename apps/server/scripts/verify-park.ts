@@ -25,14 +25,17 @@ if (!id || !/^[a-z0-9]{8,32}$/.test(id)) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const cr = (units: number) => `${(units / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} CR`;
 
+/** GET JSON from the host: 30 s per try, retried on 429s, network errors, stalls and truncated bodies. */
 async function getJson(url: string): Promise<{ status: number; body: any }> {
   for (let i = 0; ; i++) {
     try {
-      const r = await fetch(url, { headers: { accept: 'application/json' } });
+      const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
       if (r.status === 429 && i < 4) { await sleep(1000 * 2 ** i); continue; }
-      return { status: r.status, body: await r.json().catch(() => null) };
+      const text = await r.text();
+      try { return { status: r.status, body: JSON.parse(text) }; }
+      catch { if (r.ok && i < 3) throw new Error('the reply was not complete JSON'); return { status: r.status, body: null }; }
     } catch (e) {
-      if (i >= 3) throw e;
+      if (i >= 3) throw new Error(`${url}: ${(e as Error).message}`);
       await sleep(1000 * 2 ** i);
     }
   }
