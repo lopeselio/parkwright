@@ -181,6 +181,8 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
     if (deps.verifier && !r) {
       // Nothing cached for this version (never run, a restart lost it, or a transient result expired): run it now.
       // Most parks replay in well under a second; a long one answers "pending" and the result lands in the cache.
+      // Through afterSave, so a verified park is also ranked and queued for settlement (the replay itself is shared).
+      afterSave(deps, d);
       const job = deps.verifier.verify(id, d.version, d.save);
       r = await Promise.race([job, new Promise<null>((ok) => setTimeout(() => ok(null), VERIFY_WAIT_MS).unref())]);
       if (r?.transient) r = null;
