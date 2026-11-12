@@ -11,6 +11,7 @@ import os
 import sys
 
 import bpy
+from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (  # noqa: E402
@@ -476,39 +477,95 @@ def droptower():
                   arms_up=i % 2 == 0)
 
 
+def paper_lantern(loc, colour, parent=None, r=0.05):
+    """A glowing paper lantern: a squashed ball with dark caps top and bottom."""
+    x, y, z = loc
+    o = ball(r, (x, y, z), bulb(colour, 2.2), parent, seg=8, rings=5)
+    o.scale = (1, 1, 1.25)
+    cyl(r * 0.55, 0.014, (x, y, z + r * 1.2), iron(), parent, verts=6, bevel=0)
+    cyl(r * 0.55, 0.014, (x, y, z - r * 1.2), iron(), parent, verts=6, bevel=0)
+
+
 def spookwalk():
-    # 3 wide x 2 deep haunted house with a corner tower; porch, door and lanterns on the front (-Y).
+    # 3 wide x 2 deep haunted house with a corner tower; a porch with a glowing doorway, dormers, iron
+    # cresting, and the lantern-hung yard the walk is named for, on the front (-Y).
     dark, trim, roof = paint("plum"), paint("purple"), mat("slate", roughness=0.85, tag="shingle")
     box((2.9, 1.9, 0.05), (0, 0, 0.025), stone("soil"), bevel=0.01)
+    box((0.5, 0.86, 0.012), (-0.2, -0.5, 0.055), stone("grave"), bevel=0)  # the path to the door
     box((2.3, 1.24, 0.12), (0, 0.25, 0.11), stone("grave"), bevel=0.015)  # foundation
     box((2.2, 1.2, 1.05), (0, 0.25, 0.69), dark, bevel=0.02)
+    # Clapboard lines along the front.
+    for z in (0.32, 0.47, 0.62, 0.77, 0.92, 1.07):
+        box((2.2, 0.012, 0.012), (0, -0.352, z), trim, bevel=0)
     for x in (-1.1, 1.1):
         for y in (-0.35, 0.85):
             box((0.08, 0.08, 1.06), (x, y, 0.69), trim, bevel=0.015)
     box((2.36, 1.36, 0.08), (0, 0.25, 1.25), trim, bevel=0.02)
     hip_roof(2.36, 1.36, 0.8, (0, 0.25, 1.29), roof)
-    box((0.2, 0.2, 0.62), (-0.7, 0.5, 1.8), stone("brick"), rot=(0, 0.12, 0), bevel=0.015)  # crooked chimney
-    # Corner tower with a spire and a lit window.
+    # Iron cresting along the ridge with spiked finials.
+    rod((-0.5, 0.25, 2.1), (0.5, 0.25, 2.1), 0.01, iron(), verts=4)
+    for i in range(9):
+        x = -0.5 + i * 0.125
+        rod((x, 0.25, 2.08), (x, 0.25, 2.17 if i % 2 else 2.21), 0.007, iron(), verts=4)
+    for x in (-0.52, 0.52):
+        ball(0.03, (x, 0.25, 2.12), iron(), seg=6, rings=4)
+    # A dormer on the front slope with a lit round window and its own little hipped roof.
+    box((0.3, 0.3, 0.32), (-0.45, -0.12, 1.56), dark, bevel=0.01)
+    box((0.36, 0.36, 0.03), (-0.45, -0.12, 1.73), trim, bevel=0.008)
+    hip_roof(0.36, 0.36, 0.2, (-0.45, -0.12, 1.745), roof)
+    torus(0.07, 0.014, (-0.45, -0.275, 1.58), trim, rot=(math.pi / 2, 0, 0), seg=12, minor_seg=4)
+    cyl(0.06, 0.02, (-0.45, -0.27, 1.58), bulb("glow", 1.6), verts=12, rot=(math.pi / 2, 0, 0), bevel=0)
+    box((0.2, 0.2, 0.62), (-0.85, 0.5, 1.8), stone("brick"), rot=(0, 0.12, 0), bevel=0.015)  # crooked chimney
+    box((0.25, 0.25, 0.05), (-0.81, 0.5, 2.1), stone("grave"), rot=(0, 0.12, 0), bevel=0.01)
+    # Corner tower: lit windows all round, a balcony, a tall spire with a weathervane and a bat or two.
     cyl(0.27, 1.75, (0.95, -0.28, 0.93), dark, verts=8)
     torus(0.28, 0.03, (0.95, -0.28, 1.8), trim, seg=8, minor_seg=4)
-    cone(0.36, 0.75, (0.95, -0.28, 2.18), roof, verts=8, smooth=False)
-    rod((0.95, -0.28, 2.5), (0.95, -0.28, 2.75), 0.012, iron())
-    ball(0.035, (0.95, -0.28, 2.75), iron())
-    box((0.13, 0.03, 0.2), (0.95, -0.55, 1.45), bulb("glow", 1.5), bevel=0.005)
-    # Porch: deck, posts, sloped roof, door.
+    torus(0.28, 0.025, (0.95, -0.28, 1.15), trim, seg=8, minor_seg=4)
+    for k, (x, y, a) in enumerate(ring(4, 0.26, offset=-math.pi / 2)):
+        g = empty("towerwin", (0.95 + x, -0.28 + y, 1.45))
+        g.rotation_euler = (0, 0, a + math.pi / 2)
+        box((0.14, 0.03, 0.22), (0, 0, 0), trim, g, bevel=0.006)
+        box((0.1, 0.03, 0.17), (0, -0.008, 0), bulb("glow", 1.5), g, bevel=0.004)
+        box((0.1, 0.035, 0.012), (0, -0.01, 0.0), dark, g, bevel=0)
+    cone(0.4, 0.95, (0.95, -0.28, 2.3), roof, verts=8, smooth=False)
+    torus(0.33, 0.012, (0.95, -0.28, 1.92), iron(), seg=8, minor_seg=4)
+    for x, y, _a in ring(8, 0.33):
+        rod((0.95 + x, -0.28 + y, 1.84), (0.95 + x, -0.28 + y, 1.93), 0.007, iron(), verts=4)
+    rod((0.95, -0.28, 2.7), (0.95, -0.28, 3.0), 0.012, iron())
+    ball(0.035, (0.95, -0.28, 2.82), iron())
+    box((0.16, 0.012, 0.05), (0.98, -0.28, 2.93), iron(), bevel=0)
+    cone(0.03, 0.06, (1.07, -0.28, 2.93), iron(), verts=3, rot=(0, math.pi / 2, 0))
+    for bx, bz in ((0.72, 2.55), (1.2, 2.4)):
+        for side in (-1, 1):
+            box((0.07, 0.012, 0.03), (bx + side * 0.04, -0.4, bz), paint("dark"), rot=(0, side * 0.4, 0), bevel=0)
+        ball(0.018, (bx, -0.4, bz), paint("dark"), seg=6, rings=4)
+    # Porch: deck, turned posts, sloped roof edged with gingerbread trim, a glowing doorway and a ghost.
     box((0.9, 0.34, 0.08), (-0.2, -0.52, 0.13), wood(dark=True), bevel=0.012)
     box((0.5, 0.1, 0.06), (-0.2, -0.74, 0.03), stone("grave"), bevel=0.01)
     for x in (-0.6, 0.2):
         rod((x, -0.65, 0.17), (x, -0.65, 0.78), 0.022, trim, verts=8)
+        ball(0.03, (x, -0.65, 0.5), trim, seg=6, rings=4)
     box((1.0, 0.42, 0.04), (-0.2, -0.52, 0.82), roof, rot=(-0.25, 0, 0), bevel=0.01)
-    box((0.36, 0.04, 0.58), (-0.2, -0.36, 0.46), wood(dark=True), bevel=0.012)
-    ball(0.025, (-0.06, -0.39, 0.45), brass())
-    # Lit windows with frames and mullions.
-    for x, z in ((-0.85, 0.66), (0.45, 0.66), (-0.2, 1.04), (-0.75, 1.04)):
+    for i in range(9):
+        o = cone(0.05, 0.06, (-0.64 + i * 0.11, -0.73, 0.74), trim, verts=3, rot=(math.pi, 0, 0))
+        o.scale = (1, 0.3, 1)
+    # A pointed doorway lit from inside (the ride's way in), with the door swung open.
+    box((0.4, 0.05, 0.6), (-0.2, -0.355, 0.47), trim, bevel=0.012)
+    box((0.3, 0.05, 0.5), (-0.2, -0.36, 0.43), bulb("glow", 1.8), bevel=0.006)
+    prism([(-0.15, 0.0), (0.15, 0.0), (0.0, 0.14)], 0.05, (-0.2, -0.36, 0.68), trim, bevel=0.004)
+    box((0.04, 0.2, 0.5), (-0.03, -0.46, 0.43), wood(dark=True), rot=(0, 0, 0.2), bevel=0.008)
+    sphere(0.06, (-0.24, -0.4, 0.52), paint("white"), subdiv=2, scale=(1, 0.7, 1.2))  # a ghost in the door
+    cone(0.07, 0.16, (-0.24, -0.4, 0.4), paint("white"), verts=8, rot=(math.pi, 0, 0))
+    for dx in (-0.02, 0.02):
+        ball(0.01, (-0.24 + dx, -0.445, 0.54), paint("dark"), seg=6, rings=3)
+    # Lit windows with frames, mullions and crooked shutters.
+    for x, z in ((-0.85, 0.66), (0.45, 0.66), (0.35, 1.04), (-0.85, 1.04)):
         box((0.34, 0.03, 0.32), (x, -0.355, z), trim, bevel=0.008)
         box((0.28, 0.03, 0.26), (x, -0.365, z), bulb("glow", 1.5), bevel=0.004)
         box((0.02, 0.03, 0.26), (x, -0.375, z), dark, bevel=0)
         box((0.28, 0.03, 0.02), (x, -0.375, z), dark, bevel=0)
+        box((0.07, 0.02, 0.3), (x - 0.21, -0.37, z), wood(dark=True), rot=(0, 0.12, 0), bevel=0.006)
+        box((0.07, 0.02, 0.3), (x + 0.21, -0.37, z - 0.02), wood(dark=True), rot=(0, -0.2, 0), bevel=0.006)
     # Wrought-iron fence along the front, open at the path, with lanterns on the gate posts.
     line_fence((-1.38, -0.88), (-0.48, -0.88), 0.05, iron(), posts=7, h=0.24)
     line_fence((0.08, -0.88), (1.38, -0.88), 0.05, iron(), posts=9, h=0.24)
@@ -517,14 +574,37 @@ def spookwalk():
         rod((x, -0.88, 0.55), (x, -0.88, 0.62), 0.01, iron())
         ball(0.06, (x, -0.88, 0.67), bulb("glow", 3.0), seg=8, rings=5)
         cone(0.07, 0.06, (x, -0.88, 0.74), iron(), verts=6)
-    # Graves and a dead tree in the yard.
-    for x, y, tilt in ((0.75, -0.66, 0.1), (1.18, -0.6, -0.15), (-1.2, -0.62, 0.08)):
+    # The lantern walk: crooked poles across the yard hung with strings of paper lanterns.
+    poles = [(-1.3, -0.7, 1.0), (-0.75, -0.62, 0.95), (0.35, -0.66, 1.0), (1.3, -0.72, 0.9)]
+    for x, y, h in poles:
+        rod((x, y, 0.05), (x + 0.03, y, h), 0.016, wood(dark=True), verts=5)
+        rod((x + 0.03, y, h - 0.04), (x + 0.12, y, h - 0.04), 0.01, wood(dark=True), verts=4)
+    hues = ["orange", "glow", "red", "yellow"]
+    for k in range(len(poles) - 1):
+        (x0, y0, h0), (x1, y1, h1) = poles[k], poles[k + 1]
+        a, b = Vector((x0 + 0.03, y0, h0)), Vector((x1 + 0.03, y1, h1))
+        n = 4 if k != 1 else 6
+        pts = []
+        for i in range(n + 1):
+            t = i / n
+            p = a.lerp(b, t)
+            p.z -= 0.12 * 4 * t * (1 - t)
+            pts.append(p)
+        for i in range(n):
+            rod(pts[i], pts[i + 1], 0.004, iron(), verts=3)
+        for i, p in enumerate(pts[1:-1]):
+            paper_lantern((p.x, p.y, p.z - 0.08), hues[(i + k) % len(hues)], r=0.05)
+    # Graves, a pumpkin patch and a dead tree in the yard.
+    for x, y, tilt in ((0.75, -0.66, 0.1), (1.12, -0.5, -0.15), (-1.2, -0.42, 0.08)):
         box((0.15, 0.05, 0.2), (x, y, 0.12), stone("grave"), rot=(0, tilt, 0), bevel=0.035, segments=2)
+    for x, y in ((0.6, -0.42), (-0.95, -0.66), (1.25, -0.3)):
+        sphere(0.06, (x, y, 0.09), bulb("orange", 0.8), subdiv=1, scale=(1, 1, 0.75))
+        rod((x, y, 0.13), (x, y, 0.16), 0.01, mat("leaf3", roughness=0.85), verts=4)
     t = wood(dark=True)
     rod((-1.28, 0.7, 0.05), (-1.25, 0.72, 0.85), 0.04, t, verts=6)
     for dx, dy, z0, z1 in ((0.2, 0.05, 0.6, 0.85), (-0.18, -0.06, 0.5, 0.75), (0.1, -0.12, 0.75, 1.0)):
         rod((-1.26, 0.71, z0), (-1.26 + dx, 0.71 + dy, z1), 0.015, t, verts=4)
-    sign("LANTERN WALK", (-0.2, -0.96, 1.02), 0.78, 0.13, trim, paint("glow"))
+    sign("LANTERN WALK", (-0.2, -0.96, 1.02), 0.78, 0.13, trim, bulb("glow", 1.4))
     for x in (-0.55, 0.15):
         rod((x, -0.9, 0.62), (x, -0.9, 0.96), 0.012, iron())
 
