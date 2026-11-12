@@ -4,7 +4,7 @@
 //   ai proofs                    download the signed request/response of every AI reply this session
 // Every command the AI proposes runs through the same validated actions as a player's.
 import { validateMod, type ModFile } from '@parkwright/content';
-import { findRideType, runCommand } from '@parkwright/sim';
+import { findRideType, isPath, runCommand, type Park } from '@parkwright/sim';
 import { contentFromProof, verifyProof, type ProofBundle } from '@parkwright/ai/verify';
 import { cleanTurn, parseJsonReply, type ManagerTurn } from '@parkwright/ai/prompts';
 import type { Game } from './game.ts';
@@ -24,6 +24,64 @@ const ALLOWED = [/^(pw\s+)?(park|map|finance|visitors( thoughts)?|ride (list|typ
 function committed(game: Game) {
   const l = game.s.ledgerTotal;
   return -(l.construction + l.marketing);
+}
+
+/** The same command, whatever its spacing, case or `pw` prefix. */
+const norm = (cmd: string) => cmd.replace(/^pw\s+/i, '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * The shortest run of new path from (x, y) to the existing paths, over tiles the game would accept
+ * (it asks path.place's own query, so it never routes through a ride or its entrance), as straight
+ * `path place` commands. Null when there's no way through within the search limit.
+ */
+export function routeToPaths(park: Park, x: number, y: number, limit = 4000): string[] | null {
+  const s = park.s;
+  const key = (i: number, j: number) => j * s.w + i;
+  const ok = (i: number, j: number) => i >= 0 && j >= 0 && i < s.w && j < s.h && park.query('path.place', { x: i, y: j }).ok;
+  if (isPath(s, x, y) || !ok(x, y)) return null;
+  const prev = new Map<number, number>([[key(x, y), -1]]);
+  const queue: [number, number][] = [[x, y]];
+  let end: [number, number] | null = null;
+  for (let q = 0; q < queue.length && q < limit && !end; q++) {
+    const [i, j] = queue[q];
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ni = i + di, nj = j + dj;
+      if (isPath(s, ni, nj)) { end = [i, j]; break; }
+      if (prev.has(key(ni, nj)) || !ok(ni, nj)) continue;
+      prev.set(key(ni, nj), key(i, j));
+      queue.push([ni, nj]);
+    }
+  }
+  if (!end) return null;
+  const tiles: [number, number][] = [];
+  for (let k = key(end[0], end[1]); k !== -1; k = prev.get(k)!) tiles.unshift([k % s.w, Math.floor(k / s.w)]);
+  // Straight runs: a new command wherever the direction turns.
+  const cmds: string[] = [];
+  let a = tiles[0];
+  for (let n = 1; n <= tiles.length; n++) {
+    const b = tiles[n - 1], c = tiles[n];
+    if (!c || (c[0] !== a[0] && c[1] !== a[1])) { cmds.push(`path place ${a[0]} ${a[1]} ${b[0]} ${b[1]}`); a = b; }
+  }
+  return cmds;
+}
+
+/**
+ * Feedback for a command the model sends again after it already failed: don't run it, quote the error
+ * and spell out concrete next commands from the hint's coordinates, so the model stops looping.
+ */
+export function repeatFeedback(park: Park, cmd: string, failure: string): string {
+  const [error, ...rest] = failure.split('\n');
+  const hint = rest.find((l) => /hint:/.test(l))?.replace(/^\s*hint:\s*/, '');
+  const lines = [`> ${cmd}`, `(NOT RUN: this exact command already failed with "${error.replace(/^✗\s*/, '')}". Repeating it changes nothing.)`];
+  if (hint) lines.push(`The game's hint was: ${hint}`);
+  const at = hint?.match(/(\d+),(\d+)/);
+  if (at) {
+    const x = Number(at[1]), y = Number(at[2]);
+    const route = /path/.test(hint!) ? routeToPaths(park, x, y) : null;
+    if (route) lines.push(`Run exactly these commands next, in order (they lay path from ${x},${y} around the ride to the nearest path): ${route.map((c) => `"${c}"`).join(', ')}.`);
+    else lines.push(`Use the coordinates ${x},${y} from the hint, not the ones you sent.`);
+  } else lines.push('Change the command (different coordinates or another approach), or use "ride place <type>", which builds and connects a ride for you.');
+  return lines.join('\n');
 }
 
 function args(line: string) {
@@ -81,6 +139,9 @@ export class AiTerminal {
     const start = committed(this.game);
     const spent = () => committed(this.game) - start;
     const transcript: { role: 'user' | 'assistant'; content: string }[] = [];
+    /** Commands that failed this session, by normalized text → their result. */
+    const failed = new Map<string, string>();
+    let stuck = 0;
     t.writeln(`${C.ai}park manager${C.off} ${C.dim}(NEAR AI, private TEE inference) — goal: ${goal}; budget ${budgetCr} cr; it can build and look, not demolish, borrow or change fees${C.off}`);
     for (let turn = 1; turn <= MAX_TURNS; turn++) {
       let r: any;
@@ -98,14 +159,32 @@ export class AiTerminal {
         const m = c.match(/^ride (?:place|build) (\S+)/);
         const rideCost = m ? this.game.content.rideTypes[findRideType(this.game.content, m[1]) ?? '']?.cost ?? 0 : 0;
         if (spent() + rideCost > budget) { results.push(`> ${cmd}\n(skipped: over budget)`); t.writeln(`${C.acc}  skipped (over budget): ${c}${C.off}`); continue; }
+        const before = failed.get(norm(c));
+        if (before !== undefined) {
+          // The model is looping on a command that already failed: don't run it, tell it exactly what to do instead.
+          results.push(repeatFeedback(this.game.park, cmd, before));
+          t.writeln(`${C.acc}  not repeating a failed command: ${c}${C.off}`);
+          continue;
+        }
         const q = runCommand(this.game.park, c);
         t.writeln(`${C.dim}  pw ${c}${C.off}`);
         for (const l of q.text.split('\n').slice(0, 6)) t.writeln(`  ${q.ok ? '' : C.err}${l}${C.off}`);
         results.push(`> ${cmd}\n${q.text}`);
+        if (!q.ok) {
+          failed.set(norm(c), q.text);
+          // A path hint with coordinates: work out the actual route now, so the next turn can just run it.
+          const at = q.text.match(/hint: .*?path.*?(\d+),(\d+)/);
+          const route = at ? routeToPaths(this.game.park, Number(at[1]), Number(at[2])) : null;
+          if (route) results[results.length - 1] += `\n  route that works from ${at![1]},${at![2]}: ${route.map((r) => `"${r}"`).join(', ')}`;
+        }
         if (spent() >= budget) break;
       }
       transcript.push({ role: 'assistant', content: JSON.stringify(signed) }, { role: 'user', content: `RESULTS:\n${results.join('\n') || '(no commands)'}\n\nBudget left: ${((budget - spent()) / 100).toFixed(0)} cr.\n\nSTATE NOW:\n${this.parkState()}` });
       if (signed.done) break;
+      // Two turns in a row with nothing but repeats of failed commands: the model is stuck; stop spending calls.
+      const repeatsOnly = signed.commands.length > 0 && results.every((r) => r.includes('(NOT RUN: this exact command already failed'));
+      stuck = repeatsOnly ? stuck + 1 : 0;
+      if (stuck >= 2) { t.writeln(`${C.acc}the manager keeps repeating a command that failed — stopping. Try: ride place <type>, which builds and connects a ride.${C.off}`); break; }
       if (spent() >= budget) { t.writeln(`${C.acc}budget used (${(spent() / 100).toFixed(0)} cr) — stopping${C.off}`); break; }
     }
     t.writeln(`${C.ai}manager done.${C.off} ${C.dim}spent ${(spent() / 100).toFixed(0)} of ${budgetCr} cr · ai proofs to download the signed replies${C.off}`);
