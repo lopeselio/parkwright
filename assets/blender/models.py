@@ -166,32 +166,67 @@ def carousel():
 
 def teacups():
     round_plinth(1.44)
+    band(1.445, 0.1, (0, 0, 0.065), (paint("pink"), paint("cream")), verts=40)
+    torus(1.445, 0.014, (0, 0, 0.12), paint("cream"), seg=40, minor_seg=4)
     ring_fence(1.4, 0.18, paint("white"), posts=22, h=0.15, gap=0.75)
+    # A festoon canopy: a mast up through the teapot carries a crown, with strings of bulbs swung out to
+    # six lamp posts round the edge (the cups whirl underneath).
+    mast = paint("cream")
+    cyl(0.035, 1.8, (0, 0, 0.9), mast, verts=8)
+    cyl(0.14, 0.06, (0, 0, 1.78), paint("accent"), verts=12)
+    cone(0.16, 0.18, (0, 0, 1.9), paint("accent"), verts=12)
+    finial((0, 0, 1.98), h=0.24, flag_colour="yellow")
+    bulbs(8, 0.145, 1.78)
+    for i, (x, y, a) in enumerate(ring(6, 1.42, offset=TAU / 12)):
+        cyl(0.05, 0.06, (x, y, 0.03), stone(), verts=8)
+        cyl(0.025, 1.1, (x, y, 0.6), mast, verts=8)
+        torus(0.03, 0.01, (x, y, 0.4), paint("pink"), seg=8, minor_seg=4)
+        ball(0.05, (x, y, 1.18), bulb("lamp", 3.0), seg=8, rings=5)
+        cone(0.06, 0.06, (x, y, 1.24), paint("pink"), verts=8)
+        festoon((0.1 * math.cos(a), 0.1 * math.sin(a), 1.74), (x, y, 1.12), 0.12, n=7, c=["lamp", "glow", "pink"][i % 3])
+
     spin = empty("spin")
-    cyl(1.28, 0.06, (0, 0, 0.21), paint("pink"), spin, verts=40)
-    torus(1.28, 0.02, (0, 0, 0.24), paint("cream"), spin, seg=40, minor_seg=4)
-    torus(0.62, 0.012, (0, 0, 0.24), paint("cream"), spin, seg=24, minor_seg=4)
-    bulbs(20, 1.24, 0.26, spin)
-    # The teapot in the middle.
-    sphere(0.32, (0, 0, 0.5), paint("pink"), spin, subdiv=2, scale=(1, 1, 0.78))
-    torus(0.31, 0.025, (0, 0, 0.5), paint("cream"), spin, seg=20, minor_seg=4)
-    cyl(0.17, 0.06, (0, 0, 0.76), paint("cream"), spin, verts=16)
-    ball(0.055, (0, 0, 0.82), brass(), spin, seg=8, rings=5)
-    rod((0.24, 0, 0.42), (0.47, 0, 0.7), 0.045, paint("pink"), spin, verts=8)
-    torus(0.13, 0.03, (-0.32, 0, 0.52), paint("pink"), spin, rot=(math.pi / 2, 0, 0), seg=12)
+    # The turning floor: pink and cream sectors with a cream rim and a ring of bulbs.
+    cyl(1.28, 0.05, (0, 0, 0.205), paint("cream"), spin, verts=40)
+    cone(1.26, 0.012, (0, 0, 0.236), None, spin, verts=24, stripes=(paint("accent"), paint("cream")))
+    torus(1.28, 0.02, (0, 0, 0.235), paint("cream"), spin, seg=40, minor_seg=4)
+    torus(0.62, 0.012, (0, 0, 0.245), paint("cream"), spin, seg=24, minor_seg=4)
+    bulbs(20, 1.25, 0.255, spin)
+    # The teapot in the middle: a round body with a lid, a knob, a spout and a handle.
+    sphere(0.34, (0, 0, 0.52), paint("pink"), spin, subdiv=2, scale=(1, 1, 0.8))
+    torus(0.33, 0.025, (0, 0, 0.52), paint("cream"), spin, seg=20, minor_seg=4)
+    for x, y, _a in ring(8, 0.325, offset=TAU / 16):
+        ball(0.03, (x, y, 0.58), paint("cream"), spin, seg=6, rings=4)
+    cyl(0.18, 0.06, (0, 0, 0.78), paint("cream"), spin, verts=16)
+    sphere(0.15, (0, 0, 0.82), paint("pink"), spin, subdiv=1, scale=(1, 1, 0.5))
+    ball(0.055, (0, 0, 0.9), brass(), spin, seg=8, rings=5)
+    rod((0.26, 0, 0.44), (0.5, 0, 0.74), 0.045, paint("pink"), spin, verts=8)
+    cyl(0.05, 0.05, (0.51, 0, 0.76), paint("cream"), spin, verts=8, r2=0.06)
+    torus(0.14, 0.03, (-0.34, 0, 0.54), paint("pink"), spin, rot=(math.pi / 2, 0, 0), seg=12)
+    shirts = ["blue", "yellow", "green", "purple", "red", "orange", "teal"]
     for i, (x, y, a) in enumerate(ring(5, 0.9)):
         c = paint(COLOURS[i % len(COLOURS)])
         cup = empty(f"cup{i}", (x, y, 0.24), spin)
         cup.rotation_euler = (0, 0, a)
+        # Saucer, a flared cup with a cream lip and a band of dots, a handle, a wheel in the middle.
         cyl(0.36, 0.035, (0, 0, 0.02), paint("cream"), cup, verts=20)
-        cyl(0.24, 0.32, (0, 0, 0.2), c, cup, verts=20, r2=0.32)
-        torus(0.32, 0.02, (0, 0, 0.36), paint("cream"), cup, seg=20, minor_seg=4)
-        cyl(0.29, 0.01, (0, 0, 0.362), paint("cream"), cup, verts=20, bevel=0)
-        rod((0, 0, 0.36), (0, 0, 0.46), 0.015, chrome(), cup)
-        torus(0.08, 0.012, (0, 0, 0.46), chrome(), cup, seg=10, minor_seg=4)
-        torus(0.1, 0.028, (0.34, 0, 0.22), c, cup, rot=(math.pi / 2, 0, 0), seg=10)
-        for d in (-0.5, 0, 0.5):
-            ball(0.03, (0.3 * math.cos(math.pi + d), 0.3 * math.sin(math.pi + d), 0.24), paint("cream"), cup)
+        torus(0.36, 0.012, (0, 0, 0.04), c, cup, seg=20, minor_seg=4)
+        cyl(0.22, 0.34, (0, 0, 0.21), c, cup, verts=20, r2=0.33)
+        torus(0.33, 0.022, (0, 0, 0.38), paint("cream"), cup, seg=20, minor_seg=4)
+        cyl(0.3, 0.01, (0, 0, 0.37), paint("cream"), cup, verts=20, bevel=0)
+        for dx, dy, da in ring(10, 0.28):
+            o = ball(0.026, (dx, dy, 0.25), paint("white"), cup, seg=6, rings=4)
+            o.rotation_euler = (0, 0, da)
+            o.scale = (0.4, 1, 1)
+        rod((0, 0, 0.37), (0, 0, 0.47), 0.015, chrome(), cup)
+        torus(0.08, 0.012, (0, 0, 0.47), chrome(), cup, seg=10, minor_seg=4)
+        torus(0.1, 0.028, (0.36, 0, 0.24), c, cup, rot=(math.pi / 2, 0, 0), seg=10)
+        # Two riders facing each other across the wheel.
+        for k, (rx, ry, rz) in enumerate(((0.0, 0.17, math.pi), (0.0, -0.17, 0.0))):
+            if (i + k) % 4 == 3:
+                continue
+            rider((rx, ry, 0.31), cup, rot_z=rz, shirt=shirts[(i * 2 + k) % len(shirts)],
+                  skin=["cream", "terracotta", "wood"][(i + k) % 3], arms_up=(i + k) % 3 == 0, legs=False)
 
 
 def wheel():
