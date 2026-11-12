@@ -398,38 +398,82 @@ def droptower():
     box((1.84, 1.84, 0.14), (0, 0, 0.07), stone("concrete"), bevel=0.03)
     box((1.72, 1.72, 0.05), (0, 0, 0.165), stone(), bevel=0.015)
     box((0.5, 0.08, 0.09), (0, -0.96, 0.045), stone(), bevel=0.012)
+    # The loading floor: a painted ring with a yellow safety line round where the gondola lands.
+    cyl(0.86, 0.02, (0, 0, 0.195), paint("slate"), verts=32, bevel=0)
+    torus(0.84, 0.012, (0, 0, 0.205), paint("yellow"), seg=32, minor_seg=4)
     rail = paint("white")
     line_fence((-0.82, -0.82), (-0.25, -0.82), 0.19, rail, posts=4, h=0.16)
     line_fence((0.25, -0.82), (0.82, -0.82), 0.19, rail, posts=4, h=0.16)
     line_fence((-0.82, 0.82), (0.82, 0.82), 0.19, rail, posts=8, h=0.16)
     for x in (-0.82, 0.82):
         line_fence((x, -0.82), (x, 0.82), 0.19, rail, posts=8, h=0.16)
-    # The tower: column, guide rails on the corners, banding, running lights.
-    box((0.36, 0.36, 5.3), (0, 0, 2.75), paint("cream"), bevel=0.02)
+    # A control booth on the back corner and lamps on the front ones.
+    box((0.22, 0.22, 0.32), (0.66, 0.66, 0.35), paint("cream"), bevel=0.015)
+    box((0.02, 0.14, 0.1), (0.545, 0.66, 0.4), bulb("glow", 1.0), bevel=0.004)
+    box((0.27, 0.27, 0.03), (0.66, 0.66, 0.52), paint("accent"), bevel=0.01)
+    for x in (-0.86, 0.86):
+        lamp_post((x, -0.86, 0.19), h=0.55, post=paint("navy"))
+    # The tower: a cream core inside a steel lattice (four rails laced on every face), bands in the ride's
+    # colour, and strips of lights running up the front and back.
+    box((0.3, 0.3, 5.3), (0, 0, 2.75), paint("cream"), bevel=0.02)
     for sx in (-0.19, 0.19):
         for sy in (-0.19, 0.19):
-            box((0.045, 0.045, 5.2), (sx, sy, 2.75), paint("steel"), bevel=0.01)
+            box((0.05, 0.05, 5.2), (sx, sy, 2.75), paint("steel"), bevel=0.01)
+    corners = [(-0.19, -0.19), (0.19, -0.19), (0.19, 0.19), (-0.19, 0.19)]
+    for k in range(4):
+        (x0, y0), (x1, y1) = corners[k], corners[(k + 1) % 4]
+        for j in range(9):
+            z0, z1 = 0.4 + j * 0.55, 0.4 + (j + 1) * 0.55
+            if j % 2:
+                rod((x0, y0, z0), (x1, y1, z1), 0.01, paint("steel"), verts=4)
+            else:
+                rod((x1, y1, z0), (x0, y0, z1), 0.01, paint("steel"), verts=4)
     for z in [0.6 + 0.6 * i for i in range(8)]:
-        box((0.44, 0.44, 0.04), (0, 0, z), paint("purple"), bevel=0.01)
-    for z in [0.9 + 0.6 * i for i in range(7)]:
-        for x, y, _a in ring(4, 0.186, offset=-math.pi / 2):
-            ball(0.022, (x, y, z), bulb(), seg=6, rings=3)
-    box((0.62, 0.62, 0.36), (0, 0, 5.52), paint("purple"), bevel=0.03)
-    box((0.66, 0.66, 0.04), (0, 0, 5.34), brass(), bevel=0.01)
-    text("PLUMMET", (0, -0.315, 5.52), 0.1, paint("yellow"))
-    cone(0.47, 0.5, (0, 0, 5.95), paint("purple"), verts=4, rot=(0, 0, math.pi / 4))
-    rod((0, 0, 6.15), (0, 0, 6.32), 0.015, iron())
-    ball(0.07, (0, 0, 6.34), bulb("beacon", 4.0), seg=8, rings=5)
+        box((0.46, 0.46, 0.04), (0, 0, z), paint("accent"), bevel=0.01)
+    for j in range(20):
+        z = 0.8 + j * 0.22
+        for y in (-0.2, 0.2):
+            ball(0.02, (0, y * 1.08, z), bulb("lamp" if j % 2 else "glow"), seg=6, rings=3)
+            ball(0.02, (y * 1.08, 0, z + 0.11), bulb("glow" if j % 2 else "lamp"), seg=6, rings=3)
+    # The crown: a lit drum with the name on all four sides, a gallery with a rail, a pyramid roof,
+    # a mast with the beacon, and pennants at the corners.
+    box((0.7, 0.7, 0.06), (0, 0, 5.3), paint("steel"), bevel=0.015)
+    for k in range(4):
+        (x0, y0), (x1, y1) = corners[k], corners[(k + 1) % 4]
+        rod((x0 * 1.8, y0 * 1.8, 5.42), (x1 * 1.8, y1 * 1.8, 5.42), 0.01, paint("white"), verts=4)
+        cyl(0.012, 0.12, (x0 * 1.8, y0 * 1.8, 5.37), paint("white"), verts=4)
+    box((0.56, 0.56, 0.4), (0, 0, 5.56), paint("accent"), bevel=0.03)
+    for k in range(4):
+        g = empty("crownface", (0, 0, 5.56))
+        g.rotation_euler = (0, 0, k * math.pi / 2)
+        box((0.46, 0.02, 0.17), (0, -0.282, 0), paint("dark"), g, bevel=0.006)
+        text("PLUMMET", (0, -0.295, 0), 0.085, bulb("lamp", 1.4), g)
+        for t in range(5):
+            ball(0.016, (-0.2 + t * 0.1, -0.29, 0.15), bulb(), g, seg=6, rings=3)
+    box((0.62, 0.62, 0.04), (0, 0, 5.77), brass(), bevel=0.01)
+    cone(0.47, 0.5, (0, 0, 6.03), paint("accent"), verts=4, rot=(0, 0, math.pi / 4))
+    for x, y in corners:
+        finial((x * 1.6, y * 1.6, 5.79), h=0.2, flag_colour="yellow")
+    rod((0, 0, 6.2), (0, 0, 6.4), 0.015, iron())
+    ball(0.07, (0, 0, 6.42), bulb("beacon", 4.0), seg=8, rings=5)
+    # The gondola ring that rides up and drops: seats with shoulder bars and riders with dangling legs,
+    # a lit skirt underneath.
     carriage = empty("carriage", (0, 0, 0.55))
-    cyl(0.72, 0.18, (0, 0, 0), paint("purple"), carriage, verts=24)
+    cyl(0.72, 0.18, (0, 0, 0), paint("accent"), carriage, verts=24)
     torus(0.72, 0.02, (0, 0, 0.09), chrome(), carriage, seg=24, minor_seg=4)
-    cyl(0.3, 0.3, (0, 0, 0.05), paint("purple"), carriage, verts=16)
+    torus(0.72, 0.02, (0, 0, -0.09), chrome(), carriage, seg=24, minor_seg=4)
+    bulbs(24, 0.735, 0.0, carriage)
+    cyl(0.3, 0.34, (0, 0, 0.06), paint("accent"), carriage, verts=16)
+    shirts = ["blue", "yellow", "green", "red", "orange", "teal", "pink", "white"]
     for i, (x, y, a) in enumerate(ring(8, 0.6, offset=TAU / 16)):
         seat = empty(f"seat{i}", (x, y, 0.09), carriage)
         seat.rotation_euler = (0, 0, a)
         box((0.15, 0.15, 0.05), (0, 0, 0.03), paint("yellow"), seat, bevel=0.015)
-        box((0.04, 0.15, 0.28), (-0.08, 0, 0.17), paint("yellow"), seat, bevel=0.015)
-        torus(0.06, 0.012, (-0.02, 0, 0.26), chrome(), seat, rot=(math.pi / 2, 0, 0), seg=10, minor_seg=4)
+        box((0.04, 0.15, 0.3), (-0.08, 0, 0.18), paint("yellow"), seat, bevel=0.015)
+        torus(0.07, 0.013, (0.0, 0, 0.27), chrome(), seat, rot=(0, math.pi / 2, 0), seg=10, minor_seg=4)
+        if i % 3 != 2:
+            rider((0.0, 0, 0.06), seat, rot_z=math.pi / 2, shirt=shirts[i], skin=["cream", "terracotta", "wood"][i % 3],
+                  arms_up=i % 2 == 0)
 
 
 def spookwalk():
