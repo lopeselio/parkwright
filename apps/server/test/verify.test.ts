@@ -150,6 +150,10 @@ describe('GET /verify never leaves a park pending forever', () => {
     await store.create({ id: 'neververified1', name: 'Old', ownerHash: 'x', rating: 0, value: 0, visitors: 0, day: p.s.day, scenario: 'meadow', save, createdAt: 0, updatedAt: 0, version: 1 });
     const v = (await (await fetch(`${base}/api/parks/neververified1/verify`)).json()) as any;
     expect(v).toMatchObject({ verified: true, reason: 'replay matches the save' });
+    // ...and, verified, it ranks like any other park.
+    let board: any = { parks: [] };
+    for (let i = 0; i < 50 && !board.parks.length; i++) { await new Promise((r) => setTimeout(r, 50)); board = await (await fetch(`${base}/api/leaderboard`)).json(); }
+    expect(board.parks.map((p: any) => p.id)).toContain('neververified1');
   }, 30_000);
 
   it('a park that is only on chain says so instead of a bare "no such park"', async () => {
