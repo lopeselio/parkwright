@@ -86,9 +86,10 @@ async function main() {
   console.log(`          owner ${park.owner}${park.owner === 'parkwright.testnet' ? ' (unclaimed: the game server holds it until a player claims it)' : ''}, escrow ${cr(Number(park.balance))}, earned ${cr(Number(park.earned))}, ${park.settlements} settlements`);
   const a = auditChain(v.replayed.history, park);
   console.log('\n  day   replay says      on chain   ');
-  for (const r of a.days) console.log(`  ${String(r.day + 1).padStart(3)}  ${cr(r.expected).padStart(13)}  ${(r.onchain === null ? 'not settled yet' : cr(r.onchain)).padStart(13)}  ${r.ok === null ? '' : r.ok ? 'ok' : 'MISMATCH'}`);
-  console.log(`\n  earned       replay ${cr(a.expectedEarned)}, chain ${cr(a.earned)}  ${a.earned === a.expectedEarned ? 'ok' : 'MISMATCH'}`);
-  console.log(`  settlements  replay ${a.expectedSettlements}, chain ${a.settlements}  ${a.settlements === a.expectedSettlements ? 'ok' : 'MISMATCH'}  (one settle_day per visitor group per day)`);
+  for (const r of a.days) console.log(`  ${String(r.day + 1).padStart(3)}  ${cr(r.expected).padStart(13)}  ${(r.onchain === null ? 'not settled yet' : cr(r.onchain)).padStart(13)}  ${r.settling ? 'settling (agents still paying)' : r.ok === null ? '' : r.ok ? 'ok' : 'MISMATCH'}`);
+  const mark = (same: boolean) => (same ? 'ok' : a.settling !== undefined ? `ok so far (day ${a.settling + 1} is still being paid)` : 'MISMATCH');
+  console.log(`\n  earned       replay ${cr(a.expectedEarned)}, chain ${cr(a.earned)}  ${mark(a.earned === a.expectedEarned)}`);
+  console.log(`  settlements  replay ${a.expectedSettlements}, chain ${a.settlements}  ${mark(a.settlements === a.expectedSettlements)}  (one settle_day per visitor group per day)`);
   if (a.pending.length) console.log(`  pending      days ${a.pending.map((d) => d + 1).join(', ')} finished in the save but aren't settled yet (the server settles a park's finished days after it is saved, every 20 s or so)`);
   console.log(`\n${a.ok ? 'VERIFIED' : 'NOT VERIFIED'}: ${a.ok ? 'the save replays exactly and every settled day matches the replay' : 'the chain disagrees with the replay (see above)'}`);
   console.log(`  contract  https://testnet.nearblocks.io/address/${CONTRACT}`);
