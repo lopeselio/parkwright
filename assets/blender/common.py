@@ -413,6 +413,74 @@ def valance(width, loc, height, stripes, parent=None, n=8, rot_z=0.0):
     return g
 
 
+def rider(loc, parent=None, rot_z=0.0, shirt="blue", skin="cream", hair="darkwood", arms_up=False, legs=True, s=1.0):
+    """A seated rider, facing -Y before rot_z: torso, head with a hair cap, arms (raised on thrill rides) and
+    legs forward. About 150 triangles; loc is the seat point."""
+    g = empty("riderpivot", loc, parent)
+    g.rotation_euler = (0, 0, rot_z)
+    top = paint(shirt)
+    box((0.07 * s, 0.05 * s, 0.09 * s), (0, 0, 0.05 * s), top, g, bevel=0.018 * s)
+    ball(0.033 * s, (0, 0, 0.13 * s), paint(skin), g, seg=8, rings=5)
+    if hair:
+        h = ball(0.035 * s, (0, 0.006 * s, 0.142 * s), paint(hair), g, seg=8, rings=4)
+        h.scale = (1, 1, 0.7)
+    for sx in (-1, 1):
+        if arms_up:
+            rod((sx * 0.04 * s, 0, 0.08 * s), (sx * 0.06 * s, -0.01 * s, 0.2 * s), 0.011 * s, top, g, verts=4)
+        else:
+            rod((sx * 0.042 * s, 0, 0.08 * s), (sx * 0.04 * s, -0.06 * s, 0.03 * s), 0.011 * s, top, g, verts=4)
+        if legs:
+            rod((sx * 0.018 * s, 0, 0.012 * s), (sx * 0.02 * s, -0.07 * s, 0.0), 0.014 * s, paint("navy"), g, verts=4)
+            rod((sx * 0.02 * s, -0.07 * s, 0.0), (sx * 0.02 * s, -0.08 * s, -0.07 * s), 0.012 * s, paint("navy"), g, verts=4)
+    return g
+
+
+def round_valance(r, z, height, stripes, parent=None, n=24):
+    """A circular striped drop with a rounded tongue under each panel (a carousel's rounding board fringe)."""
+    band(r, height, (0, 0, z), stripes, parent, verts=n)
+    w = 2 * math.pi * r / n
+    for i, (x, y, a) in enumerate(ring(n, r, offset=math.pi / n)):
+        b = ball(w * 0.5, (x, y, z - height / 2), stripes[i % 2], parent, seg=8, rings=4)
+        b.rotation_euler = (0, 0, a + math.pi / 2)
+        b.scale = (1, 0.12, 0.45)
+
+
+def festoon(p0, p1, sag, parent=None, n=8, c="lamp", size=0.024, wire=None):
+    """A string of glowing bulbs hung between two points (x, y, z), sagging in the middle."""
+    a, b = Vector(p0), Vector(p1)
+    pts = []
+    for i in range(n + 1):
+        t = i / n
+        p = a.lerp(b, t)
+        p.z -= sag * 4 * t * (1 - t)
+        pts.append(p)
+    for i in range(n):
+        rod(pts[i], pts[i + 1], 0.004, wire or iron(), parent, verts=3)
+    for p in pts[1:-1]:
+        ball(size, (p.x, p.y, p.z - size), bulb(c), parent, seg=6, rings=3)
+
+
+def lamp_post(loc, parent=None, h=0.7, c="lamp", post=None):
+    """A slim park lamp with a glowing globe and a little cap."""
+    x, y, z = loc
+    post = post or iron()
+    cyl(0.04, 0.05, (x, y, z + 0.025), post, parent, verts=8)
+    cyl(0.016, h, (x, y, z + h / 2), post, parent, verts=6, r2=0.012)
+    ball(0.045, (x, y, z + h + 0.035), bulb(c, 3.0), parent, seg=8, rings=5)
+    cone(0.05, 0.04, (x, y, z + h + 0.09), post, parent, verts=6)
+
+
+def finial(loc, parent=None, h=0.22, flag_colour=None):
+    """A brass spike with a knob, optionally flying a pennant."""
+    x, y, z = loc
+    cyl(0.035, 0.06, (x, y, z + 0.03), brass(), parent, verts=8, r2=0.02)
+    ball(0.045, (x, y, z + 0.09), brass(), parent, seg=8, rings=5)
+    rod((x, y, z + 0.12), (x, y, z + h), 0.008, brass(), parent, verts=4)
+    if flag_colour:
+        o = cone(0.05, 0.13, (x + 0.065, y, z + h - 0.035), canvas(flag_colour), parent, verts=3, rot=(0, math.pi / 2, 0))
+        o.scale = (0.45, 0.25, 1)
+
+
 # ---- Export -------------------------------------------------------------------------------------------------
 
 KEEP = ("spin", "wheel", "carriage", "hang", "prop_")
@@ -494,3 +562,6 @@ def export(name):
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_apply=True, export_yup=True, use_selection=False, export_texcoords=False)
     print(f"EXPORTED {path} tris={tris} meshes={len(objs)}")
+    if os.environ.get("PW_TRIS"):
+        for o in sorted(objs, key=lambda o: -len(o.data.polygons)):
+            print(f"  {o.name}: {sum(len(p.vertices) - 2 for p in o.data.polygons)}")
