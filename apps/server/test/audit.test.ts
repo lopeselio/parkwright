@@ -31,3 +31,20 @@ describe('auditChain', () => {
     expect(extra.days.find((d) => d.day === 9)).toMatchObject({ expected: 0, onchain: 50, ok: false });
   });
 });
+
+describe('auditChain while a day is being settled', () => {
+  const h: { day: number; spend: Record<string, Record<string, number>> }[] = [
+    { day: 0, spend: { '0': { gate: 1000 } } },
+    { day: 1, spend: { '0': { gate: 300 }, '1': { gate: 400 }, '2': { gate: 500 } } },
+  ];
+  it('a newest day with only some groups paid is "settling", not a mismatch', () => {
+    const a = auditChain(h, park([[0, '1000'], [1, '700']], 1700, 3));
+    expect(a.ok).toBe(true);
+    expect(a.settling).toBe(1);
+    expect(a.days.find((d) => d.day === 1)).toMatchObject({ settling: true, ok: null });
+  });
+  it('but paying more than the replay, or an older day short, still fails', () => {
+    expect(auditChain(h, park([[0, '1000'], [1, '1300']], 2300, 4)).ok).toBe(false);
+    expect(auditChain(h, park([[0, '900'], [1, '700']], 1600, 3)).ok).toBe(false);
+  });
+});

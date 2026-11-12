@@ -5,9 +5,12 @@ import type { DayStats } from '@parkwright/sim';
 
 export interface ChainPark { owner: string; name: string; balance: string; earned: string; settlements: number; created_ms: number; recent_days: [number, string][] }
 
-export interface DayRow { day: number; expected: number; onchain: number | null; ok: boolean | null }
+/** ok: true matches, false disagrees, null not settled yet; `settling`: the agents are part-way through this day. */
+export interface DayRow { day: number; expected: number; onchain: number | null; ok: boolean | null; settling?: boolean }
 
 export interface Audit {
+  /** The newest settled day is still being paid (see DayRow.settling). */
+  settling?: number;
   /** One row per finished day the contract still keeps (its ring of recent days), plus finished days it hasn't seen yet. */
   days: DayRow[];
   /** Days through the last one the contract has settled. */
@@ -54,7 +57,21 @@ export function auditChain(history: Pick<DayStats, 'day' | 'spend'>[], park: Cha
   const seen = new Set(history.map((d) => d.day));
   for (const [d, amt] of chainDays) if (!seen.has(d)) days.push({ day: d, expected: 0, onchain: amt, ok: amt === 0 });
   days.sort((a, b) => a.day - b.day);
+  // The newest day on chain may be part-way through: some visitor groups' agents have paid, others are still to send.
+  // That's in progress, not a mismatch, as long as what's there is no more than the replay expects.
+  const last = days.find((r) => r.day === lastChainDay);
+  const lastExp = history.find((d) => d.day === lastChainDay);
+  let earnedOk = Number(park.earned) === expectedEarned, countOk = park.settlements === expectedSettlements;
+  if (last && lastExp && last.onchain !== null && last.onchain < last.expected && !(earnedOk && countOk)) {
+    const groups = settledFor(lastExp).groups;
+    const before = expectedEarned - last.expected;
+    if (Number(park.earned) - last.onchain === before && park.settlements < expectedSettlements && park.settlements >= expectedSettlements - groups) {
+      last.ok = null;
+      last.settling = true;
+      earnedOk = countOk = true;
+    }
+  }
   const earned = Number(park.earned);
-  const ok = days.every((r) => r.ok !== false) && earned === expectedEarned && park.settlements === expectedSettlements;
-  return { days, expectedEarned, earned, expectedSettlements, settlements: park.settlements, pending, ok };
+  const ok = days.every((r) => r.ok !== false) && earnedOk && countOk;
+  return { days, expectedEarned, earned, expectedSettlements, settlements: park.settlements, pending, ok, ...(last?.settling ? { settling: last.day } : {}) };
 }
