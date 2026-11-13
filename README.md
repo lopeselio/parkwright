@@ -96,6 +96,78 @@ VERIFIED: the save replays exactly and every settled day matches the replay
 
 **Claim on NEAR** (wallet): a claim transaction will be cited here after the owner's wallet pass: _pending_.
 
+## Built on NEAR
+
+What each NEAR technology does in Parkwright, and where to look. Each GIF is a short loop (12 seconds or less).
+
+| Technology | What Parkwright uses it for | Where to look |
+|---|---|---|
+| NEAR smart contracts (Rust, near-sdk 5.29) | the park contract: parks and their escrow, patron budgets and caps, bounded minting, claims, withdrawals | [`contracts/park`](contracts/park/src/lib.rs), [`park.parkwright.testnet`](https://testnet.nearblocks.io/address/park.parkwright.testnet) |
+| NEP-141 fungible token | the park credits (`CR`, 2 decimals): patron budgets, park escrow and owners' balances | `ft_*` in [`lib.rs`](contracts/park/src/lib.rs) |
+| Function-call access keys (agent accounts) | the 8 patron agents `g0`–`g7.parkwright.testnet`, whose only key can call `settle_day`; the server's admin key is limited to four admin methods | [`setup-patrons.ts`](packages/chain/src/setup-patrons.ts), [`settle.ts`](apps/server/src/settle.ts), [`g0.parkwright.testnet`](https://testnet.nearblocks.io/address/g0.parkwright.testnet) |
+| Public testnet RPC | `pnpm verify` replays a park locally and compares it with `get_park`, read over public RPC | [`verify-park.ts`](apps/server/scripts/verify-park.ts) |
+| NEAR Connect, NEP-413 signed messages | **Claim on NEAR** (a signed message, no gas) and **Withdraw earnings** (a `withdraw` call) from the player's wallet | [`apps/web/src/wallet.ts`](apps/web/src/wallet.ts), [`apps/server/src/claim.ts`](apps/server/src/claim.ts) |
+| NEAR AI Cloud | the AI park manager and AI mods on a TEE-attested model; the browser checks every reply's signature | [`packages/ai`](packages/ai/src/nearai.ts), [`apps/server/src/ai.ts`](apps/server/src/ai.ts) |
+
+### NEAR smart contracts: the park contract
+
+<img src="media/stack/park.gif" alt="Diagram: the game server parkwright.testnet registers each published park in park.parkwright.testnet; the patron agents g0 to g7 settle visitors' spend into the park's escrow from budgets minted at most 200,000 CR a day; the park owner withdraws the escrow to their CR balance, and credits held plus escrow always equal the supply." width="100%">
+
+One Rust contract, [`park.parkwright.testnet`](https://testnet.nearblocks.io/address/park.parkwright.testnet)
+([`lib.rs`](contracts/park/src/lib.rs)), mints the park credits (CR, an NEP-141 token) and holds what every park earned
+in escrow. The server registers each published park with `register_park` and mints the patrons' budgets with
+`fund_patrons` (at most 200,000 CR per 24 h, so even a leaked admin key can only create a bounded amount). Only a
+park's owner can `withdraw` its escrow or `transfer_park` it, and `audit` reports that credits in accounts plus escrow
+equal `ft_total_supply`.
+
+### Patron agents: function-call keys that can only pay
+
+<img src="media/stack/patrons.gif" alt="Diagram: the sim's 8 visitor groups map to the agents g0 to g7.parkwright.testnet, each with a single function-call key for settle_day; after the server's replay matches, each agent signs settle_day for its group's day into park.parkwright.testnet; the contract caps each group at 1,000 CR and each park at 5,000 CR a day and stores only venue totals." width="100%">
+
+Visitors arrive in 8 groups, and each group is paid for by an agent with its own NEAR account, `g0`–`g7.parkwright.testnet`,
+whose only key is a function-call key for `settle_day` on the contract ([`setup-patrons.ts`](packages/chain/src/setup-patrons.ts)).
+The settlement worker ([`settle.ts`](apps/server/src/settle.ts)) pays a day only after the server's replay of the save
+reproduced its state hash exactly ([`verify.ts`](apps/server/src/verify.ts)). The contract refuses a day already paid,
+a day ahead of real time, and anything over 1,000 CR a group or 5,000 CR a park for one day.
+
+### Verify a park: replay it, then read the chain
+
+<img src="media/stack/verify.gif" alt="Diagram: the public save (seed, scenario, mods and action log) is replayed locally with @parkwright/sim; get_park is read from park.parkwright.testnet over public RPC; each day the replay says the agents should have paid is compared with the contract, ending in VERIFIED, as in the run of pnpm verify f54720d4972a7f34." width="100%">
+
+`pnpm verify <parkId>` ([`verify-park.ts`](apps/server/scripts/verify-park.ts)) downloads a public save, replays it
+on your machine with `@parkwright/sim`, reads `get_park` over public testnet RPC (intea, then dRPC, then FastNEAR),
+and compares each recent day, the total earned and the settlement count with what the replay says the agents should
+have paid. It exits 0 only when everything matches; the run for Brass Meadow is in [Try it](#try-it-hosted).
+
+### Claim on NEAR and Withdraw: the player's wallet
+
+<img src="media/stack/claim.gif" alt="Diagram: your browser, which holds the park's secret key, asks a NEAR Connect wallet to sign the NEP-413 message Claim Parkwright park id; the server checks the park key, the signature and the replay, then calls assign_park, which only works while the admin still holds the park; the owner then signs withdraw for 1 yoctoNEAR and the escrow moves to their CR balance." width="100%">
+
+**Claim on NEAR** opens NEAR Connect ([`wallet.ts`](apps/web/src/wallet.ts)); the wallet signs
+`Claim Parkwright park <id>` (NEP-413) over a one-time, 5-minute challenge, with a full-access key. The server
+([`claim.ts`](apps/server/src/claim.ts)) also checks the park's secret key and its replay, then calls `assign_park`,
+which the contract allows only while the admin still holds the park, so a claim is final. **Withdraw earnings** has
+the owner's wallet sign `withdraw` (1 yoctoNEAR), which moves the escrow to their CR balance.
+
+### NEAR AI Cloud: an AI manager you can check
+
+<img src="media/stack/near-ai.gif" alt="Diagram: from the terminal, ask sends a turn to NEAR AI Cloud's TEE-hosted Qwen model, whose signed reply carries pw commands that the game checks like player input; your browser checks the reply's signature against the signing keys in the model's attestation report and shows signed in a TEE; mod ai returns a data-only mod." width="100%">
+
+The AI park manager (`ask`) and the mod designer (`mod ai`) use `Qwen/Qwen3.6-35B-A3B-FP8` on NEAR AI Cloud
+([`nearai.ts`](packages/ai/src/nearai.ts), [`ai.ts`](apps/server/src/ai.ts)). The model can only propose `pw`
+commands or a data-only mod, which the game validates like any player input. Your browser checks that each reply's
+signature covers exactly that request and reply, and that the signer is in the model's attestation report
+([`verify.ts`](packages/ai/src/verify.ts)); `ai proofs` downloads the signed bytes.
+
+### The rest of the stack
+
+<img src="media/stack/stack.gif" alt="Diagram: apps/web (three.js, xterm.js, NEAR Connect) talks to apps/server (Node 22: saves, replay worker, settlement, AI relay, MCP bridge, near-kit), which reads and writes NEAR testnet over public RPC; packages/sim runs in the browser, on the server and in pnpm verify; it runs on Azure Container Apps with Cosmos DB, Managed Redis and Application Insights; Claude Code can play over MCP." width="100%">
+
+A three.js client with an xterm.js terminal ([`apps/web`](apps/web/src/main.ts)) and a Node 22 server
+([`apps/server`](apps/server/src/main.ts)) in one container on Azure Container Apps, with saves in Cosmos DB and
+Redis for caching and locks. The deterministic sim ([`packages/sim`](packages/sim/src/index.ts)) is the same code in
+your tab, in the server's replay worker and in `pnpm verify`.
+
 ## Play locally
 
 - `pnpm install`, then `pnpm --filter @parkwright/web dev` and open http://localhost:5180.
