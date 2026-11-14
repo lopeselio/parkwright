@@ -5,7 +5,7 @@ import { parkValue, valueForMoney } from './economy.ts';
 import { LEVEL_M, PIECES } from './coaster.ts';
 import { idx, queueCapacity, Routes, SCENERY } from './map.ts';
 import type { Park } from './park.ts';
-import { placeRide } from './place.ts';
+import { placeCoaster, placeRide } from './place.ts';
 import { DAYS_PER_SEASON, DAYS_PER_WEEK, objectiveOf, rulesOf, Tile, type LedgerCategory } from './types.ts';
 import type { Objective } from '@parkwright/content';
 
@@ -266,6 +266,15 @@ export const COMMANDS: Record<string, Cmd> = {
   'coaster start': {
     usage: 'coaster start <x> <y> [--dir 0-3] [--name "…"]', summary: 'Start a coaster: 3-tile station heading dir (1 = east); entrance on the left of the middle tile',
     run(park, pos, f) { return need(pos, 2, this.usage) ?? fromAction(park, 'coaster.start', { x: +pos[0], y: +pos[1], dir: f.dir !== undefined ? +f.dir : undefined, name: typeof f.name === 'string' ? f.name : undefined }); },
+  },
+  'coaster place': {
+    usage: 'coaster place [--near x,y] [--name "…"]', summary: 'Find room near the paths and build, test and open a whole starter coaster in one go',
+    run(park, _pos, f) {
+      let near: { x: number; y: number } | undefined;
+      if (typeof f.near === 'string') { const [x, y] = f.near.split(',').map(Number); if (Number.isInteger(x) && Number.isInteger(y)) near = { x, y }; }
+      const r = placeCoaster(park, near, typeof f.name === 'string' ? f.name : undefined);
+      return r.ok ? { ok: true, text: `✓ ${r.message}`, focus: r.focus } : { ok: false, text: `✗ ${r.message}` };
+    },
   },
   'coaster add': {
     usage: 'coaster add <piece> [count] [--ride "…"]', summary: 'Add track pieces to the open end (see: pw coaster pieces)',
