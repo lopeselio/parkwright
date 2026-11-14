@@ -5,13 +5,60 @@ import type { Cloud } from '../cloud.ts';
 import { $, cr, h, toast } from './dom.ts';
 import { icon } from './icons.ts';
 
+/** /api/players/:account */
+interface PlayerProfile { account: string; contract: string; balance: string; parks: { id: string; name: string; balance: string; earned: string; settlements: number; created_ms: number; rank: number | null }[] }
+
 
 export class Hud {
   private selected: number | null = null;
   /** The ride the inspect panel shows (the world outlines it). */
   get selection() { return this.selected; }
   private drawer: 'rides' | 'stalls' | 'scenery' | null = null;
-  private panel: 'finance' | 'visitors' | 'staff' | 'parks' | null = null;
+  private panel: 'finance' | 'visitors' | 'staff' | 'parks' | 'profile' | null = null;
+  /** The player profile: a NEAR wallet's CR balance and the parks it owns, read from the contract. */
+  private profile: { account: string | null; data: PlayerProfile | null; busy: boolean; err: string } = { account: null, data: null, busy: false, err: '' };
+
+  private async profileConnect() {
+    this.profile = { ...this.profile, busy: true, err: '' };
+    this.renderSide();
+    try {
+      const { connect } = await import('../wallet.ts');
+      const { accountId } = await connect();
+      this.profile.account = accountId;
+      await this.profileLoad();
+    } catch (e) {
+      this.profile.err = (e as Error).message || 'the wallet did not connect';
+    } finally {
+      this.profile.busy = false;
+      this.renderSide();
+    }
+  }
+
+  private async profileLoad() {
+    if (!this.profile.account) return;
+    const res = await fetch(`/api/players/${encodeURIComponent(this.profile.account)}`).catch(() => null);
+    const body = res ? await res.json().catch(() => null) : null;
+    if (!res?.ok || !body) { this.profile.err = body?.error ?? 'could not read your profile from NEAR'; return; }
+    this.profile.data = body as PlayerProfile;
+  }
+
+  private async profileWithdraw(parkId: string) {
+    this.profile.busy = true;
+    this.renderSide();
+    try {
+      const { connect, withdraw } = await import('../wallet.ts');
+      const { wallet, accountId } = await connect();
+      await withdraw(wallet, accountId, parkId);
+      toast('Withdrawn — the earnings are in your CR balance on NEAR');
+      await new Promise((r) => setTimeout(r, 1500));
+      await this.profileLoad();
+    } catch (e) {
+      toast((e as Error).message || 'the wallet step did not finish', 'err');
+    } finally {
+      this.profile.busy = false;
+      this.renderSide();
+    }
+  }
   private board: Awaited<ReturnType<Cloud['leaderboard']>> = [];
   private chain: Awaited<ReturnType<Cloud['chain']>> = null;
   private verification: Awaited<ReturnType<Cloud['verification']>> = null;
@@ -71,14 +118,15 @@ export class Hud {
           // Sound (main.ts owns the audio; the bar only reflects and toggles it).
           h('button', { class: 'speed sound', 'aria-pressed': String(!muted), 'aria-label': 'Sound', title: muted ? 'Sound off (M)' : 'Sound on (M)', onclick: () => dispatchEvent(new Event('pw:sound-toggle')) }, icon(muted ? 'soundOff' : 'soundOn', 17))),
         h('div', { class: 'menu' },
-          ...(['finance', 'visitors', 'staff', 'parks'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', 'data-tour': p, onclick: () => {
+          ...(['finance', 'visitors', 'staff', 'parks', 'profile'] as const).map((p) => h('button', { class: this.panel === p ? 'on' : '', 'data-tour': p, onclick: () => {
             this.panel = this.panel === p ? null : p; this.selected = null; this.renderSide(); this.renderTop();
             if (this.panel === 'parks') {
               void this.cloud.leaderboard().then((b) => { this.board = b; this.renderSide(); });
               void this.cloud.chain().then((c) => { this.chain = c; this.renderSide(); });
               void this.cloud.verification().then((v) => { this.verification = v; this.renderSide(); });
             }
-          } }, icon(({ finance: 'finance', visitors: 'people', staff: 'staff', parks: 'parks' } as const)[p], 17), h('span', { class: 'menu-label' }, p[0].toUpperCase() + p.slice(1)))),
+            if (this.panel === 'profile' && this.profile.account) void this.profileLoad().then(() => this.renderSide());
+          } }, icon(({ finance: 'finance', visitors: 'people', staff: 'staff', parks: 'parks', profile: 'flag' } as const)[p], 17), h('span', { class: 'menu-label' }, p[0].toUpperCase() + p.slice(1)))),
           h('button', { class: 'term-btn', title: 'Terminal (`)', 'aria-label': 'Terminal', onclick: () => this.toggleTerminal() }, icon('terminal', 17), h('span', { class: 'term-label' }, 'Terminal')),
           h('button', { class: 'help-btn', 'data-tour': 'help', title: 'How to play (?)', 'aria-label': 'How to play', onclick: () => dispatchEvent(new Event('pw:help')) }, icon('help', 18)),
         ),
@@ -331,6 +379,42 @@ export class Hud {
         ...(this.board.length ? this.board.map((b, i) => h('div', { class: 'staff' },
           h('span', {}, `${i + 1}. `, h('b', {}, b.name), ` · rating ${b.rating} · ${b.visitors} visitors · day ${b.day + 1}`),
           h('a', { class: 'small', href: `/?park=${b.id}` }, 'Visit'))) : [h('p', { class: 'muted' }, 'No published parks yet.')]),
+      );
+      return;
+    }
+    if (this.panel === 'profile') {
+      side.classList.add('open');
+      const pr = this.profile;
+      const close = h('button', { class: 'x', 'aria-label': 'Close', title: 'Close', onclick: () => { this.panel = null; side.classList.remove('open'); this.last = ''; } }, icon('close', 18));
+      const d = pr.data;
+      const total = (k: 'earned' | 'balance') => (d?.parks ?? []).reduce((a, x) => a + Number(x[k]), 0);
+      side.replaceChildren(
+        h('header', {}, h('h2', {}, 'Profile'), close),
+        !pr.account ? h('div', {},
+          h('p', { class: 'muted' }, 'Connect a NEAR testnet wallet to see your parks on NEAR: your CR balance, the parks you claimed, what each has earned and where it ranks. Reading is free; nothing is signed.'),
+          h('div', { class: 'row' }, h('button', { class: 'primary', disabled: pr.busy, onclick: () => void this.profileConnect() }, pr.busy ? 'Waiting for your wallet…' : 'Connect wallet')),
+          h('p', { class: 'tip' }, 'You can play without a wallet. A park becomes yours on NEAR when you publish it, it verifies, and you press Claim on NEAR in the Parks panel.'),
+        ) : h('div', {},
+          h('dl', {},
+            h('dt', {}, 'Account'), h('dd', {}, h('a', { href: `https://testnet.nearblocks.io/address/${pr.account}`, target: '_blank', rel: 'noopener' }, pr.account)),
+            h('dt', {}, 'CR balance'), h('dd', {}, d ? cr(Number(d.balance)) : '…'),
+            h('dt', {}, 'Parks owned'), h('dd', {}, d ? String(d.parks.length) : '…'),
+            h('dt', {}, 'Earned, all parks'), h('dd', {}, d ? cr(total('earned')) : '…'),
+            h('dt', {}, 'Waiting to withdraw'), h('dd', {}, d ? cr(total('balance')) : '…'),
+            h('dt', {}, 'Best rank'), h('dd', {}, d ? (d.parks.some((x) => x.rank) ? `#${Math.min(...d.parks.filter((x) => x.rank).map((x) => x.rank!))} of the top parks` : 'not in the top 20 yet') : '…'),
+          ),
+          h('h4', {}, 'Your parks'),
+          ...(d && d.parks.length ? d.parks.map((x) => h('div', { class: 'staff' },
+            h('span', {}, h('b', {}, x.name), ` · earned ${cr(Number(x.earned))} · ${x.settlements} settlements${x.rank ? ` · rank #${x.rank}` : ''}`),
+            h('a', { class: 'small', href: `/?park=${x.id}` }, 'Open'),
+            BigInt(x.balance || '0') > 0n ? h('button', { class: 'small', disabled: pr.busy, onclick: () => void this.profileWithdraw(x.id) }, `Withdraw ${cr(Number(x.balance))}`) : '',
+          )) : [h('p', { class: 'muted' }, d ? 'No claimed parks yet. Publish your park, wait for ✓ Verified, then Claim on NEAR in the Parks panel.' : 'Reading your parks from NEAR…')]),
+          h('div', { class: 'row' },
+            h('button', { class: 'small', disabled: pr.busy, onclick: () => { void this.profileLoad().then(() => this.renderSide()); } }, 'Refresh'),
+            h('button', { class: 'small', onclick: async () => { const { disconnect } = await import('../wallet.ts'); await disconnect(); this.profile = { account: null, data: null, busy: false, err: '' }; this.renderSide(); } }, 'Disconnect')),
+          d ? h('a', { class: 'small', href: `https://testnet.nearblocks.io/address/${d.contract}`, target: '_blank', rel: 'noopener' }, 'The contract on NearBlocks ↗') : '',
+        ),
+        pr.err ? h('p', { class: 'err' }, pr.err) : '',
       );
       return;
     }
