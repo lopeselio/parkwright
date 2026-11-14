@@ -139,6 +139,9 @@ function ownerOk(doc: ParkDoc, key: string | undefined) {
 }
 
 /** Rating first, then park value (both clamped, so the score stays exact as a double). */
+/** Profile reads, cached 30 s per account. */
+const players = new Map<string, { until: number; body: unknown }>();
+
 const boardScore = (d: ParkDoc) => d.rating * 1e9 + d.value;
 
 /** The public view of a park: everything except the owner hash. */
@@ -163,6 +166,34 @@ export async function handleParks(req: IncomingMessage, res: ServerResponse, pat
       return { id: d.id, name: d.name, rating: d.rating, value: d.value, visitors: d.visitors, day: d.day };
     }));
     json(res, 200, { parks: rows.filter(Boolean), cache: cache.kind });
+    return true;
+  }
+
+  // A player's profile, read from the contract: CR balance and the parks their account owns (claimed).
+  const playerMatch = path.match(/^\/api\/players\/([a-z0-9._-]{2,64})$/);
+  if (playerMatch && req.method === 'GET') {
+    const account = playerMatch[1];
+    const hit = players.get(account);
+    if (hit && hit.until > Date.now()) { json(res, 200, hit.body); return true; }
+    try {
+      const { view, CONTRACT } = await import('@parkwright/chain');
+      const balance = await view<string>('ft_balance_of', { account_id: account });
+      const parks: { id: string; name: string; balance: string; earned: string; settlements: number; created_ms: number }[] = [];
+      for (let from = 0; from < 2000; from += 100) {
+        const page = await view<({ id: string; owner: string; name: string; balance: string; earned: string; settlements: number; created_ms: number })[]>('list_parks', { from_index: from, limit: 100 });
+        for (const pk of page) if (pk.owner === account) parks.push({ id: pk.id, name: pk.name, balance: pk.balance, earned: pk.earned, settlements: pk.settlements, created_ms: pk.created_ms });
+        if (page.length < 100) break;
+      }
+      const ranks: Record<string, number> = {};
+      const top = await cache.ztop(BOARD, 20).catch(() => []);
+      top.forEach(({ member }, i) => { ranks[member] = i + 1; });
+      const body = { account, contract: CONTRACT, balance, parks: parks.map((pk) => ({ ...pk, rank: ranks[pk.id] ?? null })) };
+      players.set(account, { until: Date.now() + 30_000, body });
+      if (players.size > 2000) players.clear();
+      json(res, 200, body);
+    } catch (e) {
+      json(res, 502, { error: `couldn't read the contract right now (${(e as Error).message.slice(0, 120)})` });
+    }
     return true;
   }
 

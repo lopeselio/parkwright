@@ -9,6 +9,7 @@ export function routeOf(path: string): string {
   if (EXACT.has(path)) return path;
   let m = path.match(/^\/api\/parks\/[^/]+(\/[a-z/]+)?$/);
   if (m) return `/api/parks/:id${m[1] ?? ''}`;
+  if (/^\/api\/players\/[^/]+$/.test(path)) return '/api/players/:account';
   if (/^\/api\/bridge\/[^/]+/.test(path)) return '/api/bridge/:code';
   if (/^\/mcp\/[^/]+/.test(path)) return '/mcp/:code';
   if (path.startsWith('/api/')) return '/api/*';
