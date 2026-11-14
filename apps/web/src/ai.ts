@@ -18,7 +18,7 @@ const MAX_TURNS = 8;
  * so a confused (or prompt-injected) model can't wreck the park — at worst it builds within budget.
  */
 const ALLOWED = [/^(pw\s+)?(park|map|finance|visitors( thoughts)?|ride (list|types|info)|staff list|marketing list|coaster pieces)\b/,
-  /^(pw\s+)?(ride (place|build|price|open)|path place|queue place|bin place|scenery place|staff hire)\b/];
+  /^(pw\s+)?(ride (place|build|price|open)|path place|queue place|bin place|scenery place|staff hire|coaster (place|start|add|undo|test))\b/];
 
 /** Money the manager has committed, from the ledger (income and refunds never refill the budget). */
 function committed(game: Game) {

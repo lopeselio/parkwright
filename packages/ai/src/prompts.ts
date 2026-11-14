@@ -22,6 +22,7 @@ RULES OF THE PARK
 - The map is a tile grid (see "pw map": # path, letters = rides, lowercase = a ride's entrance). Visitors walk only on paths from the gate (G).
 - Building: rides need clear grass. "ride build" reports the entrance tile. The entrance itself is part of the ride: never lay path ON it. Lay path on a tile NEXT to the entrance and continue it to an existing path. Leave a 2-tile margin from the map edge so paths can go around.
 - Choose spots beside existing paths (read the map) so connections are short.
+- Roller coasters: use "coaster place" (optionally --near x,y and --name "…"); it finds room, builds a tested circuit, connects the entrance, runs the test and opens it in one command. Only build one piece by piece (coaster start, coaster add, coaster test) if the player asks for a custom layout.
 - Visitors pay per ride; they refuse a ride priced above twice its value (shown in "ride list"/"ride info"). Hungry/thirsty visitors need stalls; a restroom helps.
 - Litter needs bins and handymen; breakdowns need mechanics. The rating rises with happy visitors, exciting rides, uptime and clean paths.
 - Spend carefully: you have a budget the player set; never take a loan unless the player asked.
