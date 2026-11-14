@@ -211,6 +211,11 @@ export class AiTerminal {
     }
     if (verb === 'apply') {
       if (!this.pending) { t.writeln(`${C.err}✗ nothing to apply — try mod ai "<idea>"${C.off}`); return; }
+      if (this.game.modWouldBlockClaim && !rest.includes('--anyway')) {
+        t.writeln(`${C.acc}⚠ Loading a mod now means this park can no longer be verified, so it won't settle or be claimable on NEAR (the replay applies mods from day 0). To keep a park claimable, start a New park, load the mod while it's paused on day 0, then build.${C.off}`);
+        t.writeln(`${C.acc}  type mod apply --anyway to load it into this park, or mod discard${C.off}`);
+        return;
+      }
       const why = this.game.applyMod(this.pending.mod);
       if (why) { t.writeln(`${C.err}✗ ${why}${C.off}`); return; }
       t.writeln(`${C.ok}✓ loaded ${this.pending.mod.pack.name}${C.off} — its rides are in the Rides/Stalls drawers and in pw ride types`);

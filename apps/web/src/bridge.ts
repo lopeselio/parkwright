@@ -101,6 +101,7 @@ export class Bridge {
     try { raw = JSON.parse(json); } catch { return { ok: false, text: 'mod is not valid JSON' }; }
     let v: ReturnType<typeof validateMod>;
     try { v = validateMod(raw, this.game.content); } catch (e) { return { ok: false, text: (e as Error).message }; }
+    if (this.game.modWouldBlockClaim) return { ok: false, text: 'not loaded: Loading a mod now means this park can no longer be verified, so it won\'t settle or be claimable on NEAR (the replay applies mods from day 0). To keep a park claimable, start a New park, load the mod while it\'s paused on day 0, then build. The player can still load it from the game terminal with mod apply --anyway.' };
     const why = this.game.applyMod(v.mod);
     if (why) return { ok: false, text: why };
     const p = v.mod.pack;
