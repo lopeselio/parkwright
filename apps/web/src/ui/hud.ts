@@ -356,7 +356,7 @@ export class Hud {
           this.renderSide();
         } }, link ? 'Copy share link' : 'Publish & share')),
         link && this.verification ? h('p', { class: this.verification.verified ? 'verified' : 'muted' },
-          this.verification.verified ? '✓ Verified: the server replayed every action and got exactly your park — it ranks and settles on NEAR.' : `Not verified yet: ${this.verification.reason}. Unverified parks don't rank or settle.`) : '',
+          this.verification.verified ? '✓ Verified: the server replayed every action and got exactly your park — it ranks and settles on NEAR.' : (/complete action log/.test(this.verification.reason) ? "Can't be verified: a mod was loaded after day 0 (or the park's history was cut short), so the server can't replay it exactly. This park plays on, but it won't rank, settle or be claimable on NEAR. For a claimable park: New park, load mods while paused on day 0, then build and Publish." : `Not verified yet: ${this.verification.reason}. Unverified parks don't rank or settle.`)) : '',
         this.chain?.enabled && this.chain.park ? h('div', { class: 'chain' },
           h('h4', {}, 'On NEAR testnet'),
           h('p', { class: 'muted' }, `Visitors arrive in 8 groups, each paid for by an agent with its own NEAR account and a daily spending cap. Every finished day, each agent settles what its visitors spent into your park.`),
