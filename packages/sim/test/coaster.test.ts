@@ -141,3 +141,15 @@ describe('coasters', () => {
     expect(r.trackRev).toBe(a + 2);
   });
 });
+
+describe('coaster place', () => {
+  it('finds room, builds, tests and opens a whole coaster connected to the gate', () => {
+    const p = Park.create(c, 'sandbox', 1);
+    const r = runCommand(p, 'coaster place --name "Timber Dragon"');
+    expect(r.ok, r.text).toBe(true);
+    const ride = p.s.rides.find((x) => x.name === 'Timber Dragon')!;
+    expect(isClosed(ride.track!)).toBe(true);
+    expect(ride.ratings).not.toBeNull();
+    expect(ride.status).toBe('open');
+  });
+});
