@@ -65,6 +65,12 @@ export class Game {
   }
 
   /** Load a validated mod into the running park. Returns why not, or null. */
+  /**
+   * True while the park could still be verified (and so settled and claimed on NEAR) but loading a mod now
+   * would end that: the replay applies a save's mods from tick 0, so a mod loaded mid-game can't be replayed.
+   */
+  get modWouldBlockClaim(): boolean { return this.fullLog && this.s.tick > 0; }
+
   applyMod(mod: ModFile): string | null {
     // A park whose mods change mid-game can't be replayed from its log alone (mod rules would apply from
     // tick 0), so it stops being verifiable. Mod changes aren't actions yet.
