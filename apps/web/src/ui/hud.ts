@@ -9,6 +9,9 @@ import { icon } from './icons.ts';
 interface PlayerProfile { account: string; contract: string; balance: string; parks: { id: string; name: string; balance: string; earned: string; settlements: number; created_ms: number; rank: number | null }[] }
 
 
+// NEAR Connect throws this when its wallet picker is closed without choosing a wallet: not an error to show.
+const dismissed = (e: unknown): boolean => (e as Error)?.message === 'User rejected';
+
 export class Hud {
   private selected: number | null = null;
   /** The ride the inspect panel shows (the world outlines it). */
@@ -27,7 +30,7 @@ export class Hud {
       this.profile.account = accountId;
       await this.profileLoad();
     } catch (e) {
-      this.profile.err = (e as Error).message || 'the wallet did not connect';
+      if (!dismissed(e)) this.profile.err = (e as Error).message || 'the wallet did not connect';
     } finally {
       this.profile.busy = false;
       this.renderSide();
@@ -53,7 +56,7 @@ export class Hud {
       await new Promise((r) => setTimeout(r, 1500));
       await this.profileLoad();
     } catch (e) {
-      toast((e as Error).message || 'the wallet step did not finish', 'err');
+      if (!dismissed(e)) toast((e as Error).message || 'the wallet step did not finish', 'err');
     } finally {
       this.profile.busy = false;
       this.renderSide();
@@ -72,7 +75,7 @@ export class Hud {
       if (kind === 'claim') toast(`Claimed — the park now belongs to ${await this.cloud.claim()}`);
       else { await this.cloud.withdraw(); toast('Withdrawn — the earnings are in your CR balance on NEAR'); }
     } catch (e) {
-      toast((e as Error).message || 'the wallet step did not finish', 'err');
+      if (!dismissed(e)) toast((e as Error).message || 'the wallet step did not finish', 'err');
     } finally {
       this.claiming = false;
       this.chain = await this.cloud.chain(true);
